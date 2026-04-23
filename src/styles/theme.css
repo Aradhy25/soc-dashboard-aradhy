@@ -1,0 +1,19 @@
+@theme {
+  --font-sans: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --color-cyber-cyan: #00f0ff;
+  --color-cyber-purple: #8b5cf6;
+  --color-cyber-pink: #ff00ff;
+  --color-cyber-green: #00ff88;
+  --color-cyber-red: #ff0055;
+  --color-cyber-dark: #000913;
+  --color-cyber-darker: #000509;
+  --color-cyber-panel: #0a1628;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+  background: #000509;
+}

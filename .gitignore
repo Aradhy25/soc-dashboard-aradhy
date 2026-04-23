@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+.vite/
+*.log
+coverage/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+recovered/
+source_make/
