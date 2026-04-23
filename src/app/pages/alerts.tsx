@@ -1,23 +1,83 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { mockAlerts } from '../data/mock-data';
 import { Modal } from '../components/modal';
 import { AlertDetail } from '../components/alert-detail';
 import { AlertTriangle, Filter, Search, Plus } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router';
 
 export default function Alerts() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
+
+  const severityFilter = useMemo(() => {
+    const v = query.get('severity');
+    return v && ['critical', 'high', 'medium', 'low'].includes(v) ? v : 'all';
+  }, [query]);
+
+  const statusFilter = useMemo(() => {
+    const v = query.get('status');
+    return v && ['open', 'investigating', 'resolved'].includes(v) ? v : 'all';
+  }, [query]);
+
+  const searchQuery = useMemo(() => (query.get('q') ?? '').trim(), [query]);
+  const alertId = useMemo(() => query.get('id') ?? '', [query]);
+
+  const attackTypeOptions = useMemo(() => {
+    return Array.from(new Set(mockAlerts.map((a) => a.attackType))).sort((a, b) => a.localeCompare(b));
+  }, []);
+
+  const attackTypeFilter = useMemo(() => {
+    const v = query.get('attackType');
+    return v && attackTypeOptions.includes(v) ? v : 'all';
+  }, [attackTypeOptions, query]);
+
   const [selectedAlert, setSelectedAlert] = useState<typeof mockAlerts[0] | null>(null);
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const updateQuery = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(location.search);
+    for (const [key, value] of Object.entries(updates)) {
+      if (!value || value.trim() === '' || value === 'all') next.delete(key);
+      else next.set(key, value);
+    }
+    const search = next.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
 
   const filteredAlerts = mockAlerts.filter(alert => {
     if (severityFilter !== 'all' && alert.severity !== severityFilter) return false;
     if (statusFilter !== 'all' && alert.status !== statusFilter) return false;
+    if (attackTypeFilter !== 'all' && alert.attackType !== attackTypeFilter) return false;
+    if (searchQuery) {
+      const haystack = [
+        alert.id,
+        alert.title,
+        alert.description,
+        alert.status,
+        alert.severity,
+        alert.affectedSystem,
+        alert.sourceIp,
+        alert.attackType,
+        alert.mitreId ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (!haystack.includes(searchQuery.toLowerCase())) return false;
+    }
     return true;
   });
 
   const handleAlertAction = (action: string) => {
     console.log('Action:', action);
   };
+
+  useEffect(() => {
+    if (!alertId) {
+      setSelectedAlert(null);
+      return;
+    }
+    setSelectedAlert(mockAlerts.find((a) => a.id === alertId) ?? null);
+  }, [alertId]);
 
   return (
     <div className="space-y-6">
@@ -43,7 +103,7 @@ export default function Alerts() {
 
           <select
             value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
+            onChange={(e) => updateQuery({ severity: e.target.value })}
             className="px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] text-sm outline-none focus:border-[#00f0ff] transition-colors"
           >
             <option value="all">All Severities</option>
@@ -55,7 +115,7 @@ export default function Alerts() {
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => updateQuery({ status: e.target.value })}
             className="px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] text-sm outline-none focus:border-[#00f0ff] transition-colors"
           >
             <option value="all">All Statuses</option>
@@ -64,11 +124,26 @@ export default function Alerts() {
             <option value="resolved">Resolved</option>
           </select>
 
+          <select
+            value={attackTypeFilter}
+            onChange={(e) => updateQuery({ attackType: e.target.value })}
+            className="px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] text-sm outline-none focus:border-[#00f0ff] transition-colors"
+          >
+            <option value="all">All Attack Types</option>
+            {attackTypeOptions.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+
           <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628]">
             <Search className="w-4 h-4 text-[#64748b]" />
             <input
               type="text"
               placeholder="Search alerts..."
+              value={searchQuery}
+              onChange={(e) => updateQuery({ q: e.target.value })}
               className="flex-1 bg-transparent border-none outline-none text-sm text-[#00f0ff] placeholder:text-[#64748b]"
             />
           </div>
@@ -114,7 +189,7 @@ export default function Alerts() {
               {filteredAlerts.map((alert) => (
                 <tr
                   key={alert.id}
-                  onClick={() => setSelectedAlert(alert)}
+                  onClick={() => updateQuery({ id: alert.id })}
                   className="border-b border-[#00f0ff]/10 hover:bg-[#0a1628]/80 cursor-pointer transition-colors"
                 >
                   <td className="p-4">
@@ -162,7 +237,7 @@ export default function Alerts() {
       {/* Modal */}
       <Modal
         isOpen={selectedAlert !== null}
-        onClose={() => setSelectedAlert(null)}
+        onClose={() => updateQuery({ id: null })}
         title={`Alert Details - ${selectedAlert?.id}`}
         size="xl"
       >

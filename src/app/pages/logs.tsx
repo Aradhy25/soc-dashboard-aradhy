@@ -1,15 +1,62 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { mockLogs } from '../data/mock-data';
 import { Modal } from '../components/modal';
 import { Filter, Search, Download } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router';
 
 export default function Logs() {
-  const [selectedLog, setSelectedLog] = useState<typeof mockLogs[0] | null>(null);
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
 
-  const filteredLogs = mockLogs.filter(log => 
-    severityFilter === 'all' || log.severity === severityFilter
-  );
+  const severityFilter = useMemo(() => {
+    const v = query.get('severity');
+    return v && ['critical', 'error', 'warning', 'info'].includes(v) ? v : 'all';
+  }, [query]);
+
+  const searchQuery = useMemo(() => (query.get('q') ?? '').trim(), [query]);
+  const logId = useMemo(() => query.get('id') ?? '', [query]);
+
+  const [selectedLog, setSelectedLog] = useState<typeof mockLogs[0] | null>(null);
+
+  const updateQuery = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(location.search);
+    for (const [key, value] of Object.entries(updates)) {
+      if (!value || value.trim() === '' || value === 'all') next.delete(key);
+      else next.set(key, value);
+    }
+    const search = next.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+
+  const filteredLogs = mockLogs.filter((log) => {
+    if (severityFilter !== 'all' && log.severity !== severityFilter) return false;
+    if (searchQuery) {
+      const haystack = [
+        log.id,
+        log.timestamp,
+        log.device,
+        log.eventType,
+        log.severity,
+        log.message,
+        log.sourceIp ?? '',
+        log.destinationIp ?? '',
+        log.rawData,
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (!haystack.includes(searchQuery.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    if (!logId) {
+      setSelectedLog(null);
+      return;
+    }
+    setSelectedLog(mockLogs.find((l) => l.id === logId) ?? null);
+  }, [logId]);
 
   return (
     <div className="space-y-6">
@@ -33,7 +80,7 @@ export default function Logs() {
 
           <select
             value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
+            onChange={(e) => updateQuery({ severity: e.target.value })}
             className="px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] text-sm outline-none focus:border-[#00f0ff]"
           >
             <option value="all">All Severities</option>
@@ -48,6 +95,8 @@ export default function Logs() {
             <input
               type="text"
               placeholder="Search logs..."
+              value={searchQuery}
+              onChange={(e) => updateQuery({ q: e.target.value })}
               className="flex-1 bg-transparent border-none outline-none text-sm text-[#00f0ff] placeholder:text-[#64748b]"
             />
           </div>
@@ -71,7 +120,7 @@ export default function Logs() {
               {filteredLogs.map((log) => (
                 <tr
                   key={log.id}
-                  onClick={() => setSelectedLog(log)}
+                  onClick={() => updateQuery({ id: log.id })}
                   className="border-b border-[#00f0ff]/10 hover:bg-[#0a1628]/80 cursor-pointer transition-colors"
                 >
                   <td className="p-4">
@@ -102,7 +151,7 @@ export default function Logs() {
 
       <Modal
         isOpen={selectedLog !== null}
-        onClose={() => setSelectedLog(null)}
+        onClose={() => updateQuery({ id: null })}
         title={`Log Details - ${selectedLog?.id}`}
         size="lg"
       >

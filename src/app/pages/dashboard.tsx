@@ -4,11 +4,13 @@ import { mockAlerts, mockDevices, mockLogs, attackTrendsData, attackMapData } fr
 import { Modal } from '../components/modal';
 import { AlertDetail } from '../components/alert-detail';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useNavigate } from 'react-router';
 
 export default function Dashboard() {
   const [selectedAlert, setSelectedAlert] = useState<typeof mockAlerts[0] | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<typeof mockDevices[0] | null>(null);
   const [selectedLog, setSelectedLog] = useState<typeof mockLogs[0] | null>(null);
+  const navigate = useNavigate();
 
   const criticalAlerts = mockAlerts.filter(a => a.severity === 'critical');
   const highAlerts = mockAlerts.filter(a => a.severity === 'high');
@@ -34,7 +36,12 @@ export default function Dashboard() {
 
       {/* Alert Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 rounded-lg border border-[#ff0055]/30 bg-gradient-to-br from-[#ff0055]/20 to-transparent shadow-[0_0_15px_rgba(255,0,85,0.3)] hover:scale-[1.02] transition-transform">
+        <button
+          type="button"
+          onClick={() => navigate('/alerts?severity=critical')}
+          className="p-6 rounded-lg border border-[#ff0055]/30 bg-gradient-to-br from-[#ff0055]/20 to-transparent shadow-[0_0_15px_rgba(255,0,85,0.3)] hover:scale-[1.02] transition-transform text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff0055]/40"
+          aria-label="View critical alerts"
+        >
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Critical Alerts</p>
@@ -43,9 +50,14 @@ export default function Dashboard() {
             <AlertTriangle className="w-8 h-8 text-[#ff0055]" />
           </div>
           <div className="text-xs text-[#ff0055]">Requires immediate attention</div>
-        </div>
+        </button>
 
-        <div className="p-6 rounded-lg border border-[#ff00ff]/30 bg-gradient-to-br from-[#ff00ff]/20 to-transparent shadow-[0_0_15px_rgba(255,0,255,0.3)] hover:scale-[1.02] transition-transform">
+        <button
+          type="button"
+          onClick={() => navigate('/alerts?severity=high')}
+          className="p-6 rounded-lg border border-[#ff00ff]/30 bg-gradient-to-br from-[#ff00ff]/20 to-transparent shadow-[0_0_15px_rgba(255,0,255,0.3)] hover:scale-[1.02] transition-transform text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff00ff]/40"
+          aria-label="View high alerts"
+        >
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">High Alerts</p>
@@ -54,9 +66,14 @@ export default function Dashboard() {
             <AlertTriangle className="w-8 h-8 text-[#ff00ff]" />
           </div>
           <div className="text-xs text-[#ff00ff]">Elevated threat level</div>
-        </div>
+        </button>
 
-        <div className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#00f0ff]/20 to-transparent shadow-[0_0_15px_rgba(0,240,255,0.3)] hover:scale-[1.02] transition-transform">
+        <button
+          type="button"
+          onClick={() => navigate('/endpoints?status=online')}
+          className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#00f0ff]/20 to-transparent shadow-[0_0_15px_rgba(0,240,255,0.3)] hover:scale-[1.02] transition-transform text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00f0ff]/40"
+          aria-label="View online endpoints"
+        >
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Active Devices</p>
@@ -65,9 +82,14 @@ export default function Dashboard() {
             <Activity className="w-8 h-8 text-[#00f0ff]" />
           </div>
           <div className="text-xs text-[#00f0ff]">Monitored endpoints</div>
-        </div>
+        </button>
 
-        <div className="p-6 rounded-lg border border-[#00ff88]/30 bg-gradient-to-br from-[#00ff88]/20 to-transparent shadow-[0_0_15px_rgba(0,255,136,0.3)] hover:scale-[1.02] transition-transform">
+        <button
+          type="button"
+          onClick={() => navigate('/reports')}
+          className="p-6 rounded-lg border border-[#00ff88]/30 bg-gradient-to-br from-[#00ff88]/20 to-transparent shadow-[0_0_15px_rgba(0,255,136,0.3)] hover:scale-[1.02] transition-transform text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00ff88]/40"
+          aria-label="Open reports"
+        >
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Security Score</p>
@@ -76,7 +98,7 @@ export default function Dashboard() {
             <Shield className="w-8 h-8 text-[#00ff88]" />
           </div>
           <div className="text-xs text-[#00ff88]">↑ 2.3% from yesterday</div>
-        </div>
+        </button>
       </div>
 
       {/* Attack Trends & Top Alerts */}
@@ -88,7 +110,16 @@ export default function Dashboard() {
               <h3 className="text-xl text-[#00f0ff] mb-2">Attack Trends</h3>
               <p className="text-sm text-[#64748b]">24-hour activity overview</p>
             </div>
-            <TrendingUp className="w-6 h-6 text-[#00f0ff]" />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigate('/alerts')}
+                className="px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 hover:shadow-[0_0_15px_rgba(0,240,255,0.25)] transition-all text-xs text-[#00f0ff]"
+              >
+                View Alerts
+              </button>
+              <TrendingUp className="w-6 h-6 text-[#00f0ff]" />
+            </div>
           </div>
 
           <ResponsiveContainer width="100%" height={250}>
@@ -141,9 +172,18 @@ export default function Dashboard() {
 
         {/* Critical Alerts List */}
         <div className="p-6 rounded-lg border border-[#ff0055]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] shadow-[0_0_20px_rgba(255,0,85,0.2)]">
-          <div className="mb-6">
-            <h3 className="text-xl text-[#ff0055] mb-2">Critical Alerts</h3>
-            <p className="text-sm text-[#64748b]">Requires immediate action</p>
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div>
+              <h3 className="text-xl text-[#ff0055] mb-2">Critical Alerts</h3>
+              <p className="text-sm text-[#64748b]">Requires immediate action</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/alerts?status=open')}
+              className="px-3 py-2 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 hover:bg-[#ff0055]/20 hover:shadow-[0_0_15px_rgba(255,0,85,0.25)] transition-all text-xs text-[#ff0055]"
+            >
+              View Open
+            </button>
           </div>
 
           <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar">
@@ -178,9 +218,18 @@ export default function Dashboard() {
 
       {/* Attack Map */}
       <div className="p-6 rounded-lg border border-[#8b5cf6]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] shadow-[0_0_20px_rgba(139,92,246,0.2)]">
-        <div className="mb-6">
-          <h3 className="text-xl text-[#8b5cf6] mb-2">Global Attack Map</h3>
-          <p className="text-sm text-[#64748b]">Attack origins by region</p>
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-xl text-[#8b5cf6] mb-2">Global Attack Map</h3>
+            <p className="text-sm text-[#64748b]">Attack origins by region</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/threat-intel')}
+            className="px-3 py-2 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10 hover:bg-[#8b5cf6]/20 hover:shadow-[0_0_15px_rgba(139,92,246,0.25)] transition-all text-xs text-[#8b5cf6]"
+          >
+            Threat Intel
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -203,9 +252,18 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Devices */}
         <div className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] shadow-[0_0_20px_rgba(0,240,255,0.2)]">
-          <div className="mb-6">
-            <h3 className="text-xl text-[#00f0ff] mb-2">Active Devices</h3>
-            <p className="text-sm text-[#64748b]">Monitored endpoints</p>
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div>
+              <h3 className="text-xl text-[#00f0ff] mb-2">Active Devices</h3>
+              <p className="text-sm text-[#64748b]">Monitored endpoints</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/endpoints')}
+              className="px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 hover:shadow-[0_0_15px_rgba(0,240,255,0.25)] transition-all text-xs text-[#00f0ff]"
+            >
+              View Endpoints
+            </button>
           </div>
 
           <div className="space-y-3">
@@ -243,9 +301,18 @@ export default function Dashboard() {
 
         {/* Recent Logs */}
         <div className="p-6 rounded-lg border border-[#00ff88]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] shadow-[0_0_20px_rgba(0,255,136,0.2)]">
-          <div className="mb-6">
-            <h3 className="text-xl text-[#00ff88] mb-2">Recent Logs</h3>
-            <p className="text-sm text-[#64748b]">Latest system events</p>
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div>
+              <h3 className="text-xl text-[#00ff88] mb-2">Recent Logs</h3>
+              <p className="text-sm text-[#64748b]">Latest system events</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/logs')}
+              className="px-3 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 hover:shadow-[0_0_15px_rgba(0,255,136,0.25)] transition-all text-xs text-[#00ff88]"
+            >
+              View Logs
+            </button>
           </div>
 
           <div className="space-y-3">
