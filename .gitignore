@@ -9,3 +9,4 @@ vite.config.js
 vite.config.d.ts
 recovered/
 source_make/
+.vercel
