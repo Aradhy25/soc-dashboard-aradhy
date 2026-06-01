@@ -1,4 +1,4 @@
-import { Alert } from '../data/mock-data';
+import type { AlertItem } from '../lib/types';
 import { 
   Shield, 
   Clock, 
@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 interface AlertDetailProps {
-  alert: Alert;
+  alert: AlertItem;
   onAction: (action: string) => void;
 }
 
@@ -46,6 +46,8 @@ const severityColors = {
 
 export function AlertDetail({ alert, onAction }: AlertDetailProps) {
   const colors = severityColors[alert.severity];
+  const affectedSystem = alert.affectedSystem ?? alert.device?.name ?? 'unknown';
+  const sourceIp = alert.sourceIp ?? 'unknown';
 
   return (
     <div className="space-y-6">
@@ -87,7 +89,7 @@ export function AlertDetail({ alert, onAction }: AlertDetailProps) {
             <Server className="w-4 h-4 text-[#00f0ff]" />
             <span className="text-sm text-[#64748b]">Affected System</span>
           </div>
-          <p className="text-[#00f0ff]">{alert.affectedSystem}</p>
+          <p className="text-[#00f0ff]">{affectedSystem}</p>
         </div>
 
         <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
@@ -95,7 +97,7 @@ export function AlertDetail({ alert, onAction }: AlertDetailProps) {
             <MapPin className="w-4 h-4 text-[#00f0ff]" />
             <span className="text-sm text-[#64748b]">Source IP</span>
           </div>
-          <p className="text-[#00f0ff] font-mono">{alert.sourceIp}</p>
+          <p className="text-[#00f0ff] font-mono">{sourceIp}</p>
         </div>
 
         <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
@@ -108,7 +110,7 @@ export function AlertDetail({ alert, onAction }: AlertDetailProps) {
       </div>
 
       {/* MITRE ATT&CK */}
-      {alert.mitreId && (
+      {alert.mitreId ? (
         <div className="p-4 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10">
           <div className="flex items-center gap-2 mb-2">
             <Shield className="w-4 h-4 text-[#8b5cf6]" />
@@ -116,7 +118,7 @@ export function AlertDetail({ alert, onAction }: AlertDetailProps) {
           </div>
           <p className="text-[#8b5cf6] font-mono">{alert.mitreId}</p>
         </div>
-      )}
+      ) : null}
 
       {/* Raw Logs */}
       <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#000509]">

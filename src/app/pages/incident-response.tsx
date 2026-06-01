@@ -1,10 +1,62 @@
-import { useState } from 'react';
-import { mockIncidents } from '../data/mock-data';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/modal';
 import { Shield, Clock, Users, CheckCircle } from 'lucide-react';
 
+import { apiGet, apiPatch } from '../lib/api';
+import type { IncidentItem } from '../lib/types';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((x): x is string => typeof x === 'string');
+}
+
 export default function IncidentResponse() {
-  const [selectedIncident, setSelectedIncident] = useState<typeof mockIncidents[0] | null>(null);
+  const [items, setItems] = useState<IncidentItem[]>([]);
+  const [selectedIncident, setSelectedIncident] = useState<IncidentItem | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await apiGet<{ items: IncidentItem[] }>('/incidents');
+        setItems(next.items);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load incidents');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const counts = useMemo(() => {
+    return {
+      open: items.filter((i) => i.status === 'open').length,
+      investigating: items.filter((i) => i.status === 'investigating').length,
+      contained: items.filter((i) => i.status === 'contained').length,
+      resolved: items.filter((i) => i.status === 'resolved').length,
+    };
+  }, [items]);
+
+  const closeIncident = () => {
+    void (async () => {
+      if (!selectedIncident) return;
+      try {
+        await apiPatch(`/incidents/${selectedIncident.id}`, { status: 'resolved' });
+      } finally {
+        refresh();
+      }
+    })();
+  };
 
   return (
     <div className="space-y-6">
@@ -13,12 +65,18 @@ export default function IncidentResponse() {
         <p className="text-sm text-[#64748b]">Manage and track security incidents</p>
       </div>
 
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="p-6 rounded-lg border border-[#ff0055]/30 bg-gradient-to-br from-[#ff0055]/20 to-transparent shadow-[0_0_15px_rgba(255,0,85,0.3)]">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Open</p>
-              <p className="text-3xl text-[#ff0055]">{mockIncidents.filter(i => i.status === 'open').length}</p>
+              <p className="text-3xl text-[#ff0055]">{counts.open}</p>
             </div>
             <Shield className="w-8 h-8 text-[#ff0055]" />
           </div>
@@ -28,7 +86,7 @@ export default function IncidentResponse() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Investigating</p>
-              <p className="text-3xl text-[#ff00ff]">{mockIncidents.filter(i => i.status === 'investigating').length}</p>
+              <p className="text-3xl text-[#ff00ff]">{counts.investigating}</p>
             </div>
             <Clock className="w-8 h-8 text-[#ff00ff]" />
           </div>
@@ -38,7 +96,7 @@ export default function IncidentResponse() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Contained</p>
-              <p className="text-3xl text-[#8b5cf6]">{mockIncidents.filter(i => i.status === 'contained').length}</p>
+              <p className="text-3xl text-[#8b5cf6]">{counts.contained}</p>
             </div>
             <CheckCircle className="w-8 h-8 text-[#8b5cf6]" />
           </div>
@@ -48,7 +106,7 @@ export default function IncidentResponse() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Resolved</p>
-              <p className="text-3xl text-[#00ff88]">{mockIncidents.filter(i => i.status === 'resolved').length}</p>
+              <p className="text-3xl text-[#00ff88]">{counts.resolved}</p>
             </div>
             <CheckCircle className="w-8 h-8 text-[#00ff88]" />
           </div>
@@ -70,46 +128,56 @@ export default function IncidentResponse() {
               </tr>
             </thead>
             <tbody>
-              {mockIncidents.map((incident) => (
-                <tr
-                  key={incident.id}
-                  onClick={() => setSelectedIncident(incident)}
-                  className="border-b border-[#00f0ff]/10 hover:bg-[#0a1628]/80 cursor-pointer transition-colors"
-                >
-                  <td className="p-4">
-                    <span className="text-[#00f0ff] font-mono text-sm">{incident.id}</span>
-                  </td>
-                  <td className="p-4 text-[#00f0ff]">{incident.title}</td>
-                  <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded uppercase ${
-                      incident.severity === 'critical' ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30' :
-                      incident.severity === 'high' ? 'bg-[#ff00ff]/20 text-[#ff00ff] border border-[#ff00ff]/30' :
-                      'bg-[#8b5cf6]/20 text-[#8b5cf6] border border-[#8b5cf6]/30'
-                    }`}>
-                      {incident.severity}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      incident.status === 'resolved' ? 'bg-[#00ff88]/20 text-[#00ff88]' :
-                      incident.status === 'contained' ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]' :
-                      incident.status === 'investigating' ? 'bg-[#ff00ff]/20 text-[#ff00ff]' :
-                      'bg-[#ff0055]/20 text-[#ff0055]'
-                    }`}>
-                      {incident.status}
-                    </span>
-                  </td>
-                  <td className="p-4 text-[#8b5cf6]">{incident.assignedTo}</td>
-                  <td className="p-4">
-                    <span className="px-2 py-1 text-xs rounded bg-[#00f0ff]/20 text-[#00f0ff]">
-                      {incident.affectedSystems.length} systems
-                    </span>
-                  </td>
-                  <td className="p-4 text-[#64748b] text-sm">
-                    {new Date(incident.createdAt).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
+              {items.map((incident) => {
+                const affectedSystems = asStringArray(incident.affectedSystems);
+                return (
+                  <tr
+                    key={incident.id}
+                    onClick={() => setSelectedIncident(incident)}
+                    className="border-b border-[#00f0ff]/10 hover:bg-[#0a1628]/80 cursor-pointer transition-colors"
+                  >
+                    <td className="p-4">
+                      <span className="text-[#00f0ff] font-mono text-sm">{incident.id}</span>
+                    </td>
+                    <td className="p-4 text-[#00f0ff]">{incident.title}</td>
+                    <td className="p-4">
+                      <span
+                        className={`px-2 py-1 text-xs rounded uppercase ${
+                          incident.severity === 'critical'
+                            ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30'
+                            : incident.severity === 'high'
+                              ? 'bg-[#ff00ff]/20 text-[#ff00ff] border border-[#ff00ff]/30'
+                              : 'bg-[#8b5cf6]/20 text-[#8b5cf6] border border-[#8b5cf6]/30'
+                        }`}
+                      >
+                        {incident.severity}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span
+                        className={`px-2 py-1 text-xs rounded ${
+                          incident.status === 'resolved'
+                            ? 'bg-[#00ff88]/20 text-[#00ff88]'
+                            : incident.status === 'contained'
+                              ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]'
+                              : incident.status === 'investigating'
+                                ? 'bg-[#ff00ff]/20 text-[#ff00ff]'
+                                : 'bg-[#ff0055]/20 text-[#ff0055]'
+                        }`}
+                      >
+                        {incident.status}
+                      </span>
+                    </td>
+                    <td className="p-4 text-[#8b5cf6]">{incident.assignedTo}</td>
+                    <td className="p-4">
+                      <span className="px-2 py-1 text-xs rounded bg-[#00f0ff]/20 text-[#00f0ff]">
+                        {affectedSystems.length} systems
+                      </span>
+                    </td>
+                    <td className="p-4 text-[#64748b] text-sm">{new Date(incident.createdAt).toLocaleString()}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -123,29 +191,39 @@ export default function IncidentResponse() {
       >
         {selectedIncident && (
           <div className="space-y-6">
-            <div className={`p-4 rounded-lg border ${
-              selectedIncident.severity === 'critical' 
-                ? 'border-[#ff0055]/30 bg-[#ff0055]/10' 
-                : 'border-[#ff00ff]/30 bg-[#ff00ff]/10'
-            }`}>
-              <h3 className={`text-lg mb-2 ${
-                selectedIncident.severity === 'critical' ? 'text-[#ff0055]' : 'text-[#ff00ff]'
-              }`}>
+            <div
+              className={`p-4 rounded-lg border ${
+                selectedIncident.severity === 'critical'
+                  ? 'border-[#ff0055]/30 bg-[#ff0055]/10'
+                  : 'border-[#ff00ff]/30 bg-[#ff00ff]/10'
+              }`}
+            >
+              <h3
+                className={`text-lg mb-2 ${
+                  selectedIncident.severity === 'critical' ? 'text-[#ff0055]' : 'text-[#ff00ff]'
+                }`}
+              >
                 {selectedIncident.title}
               </h3>
               <div className="flex items-center gap-2">
-                <span className={`px-2 py-1 text-xs rounded uppercase ${
-                  selectedIncident.severity === 'critical' 
-                    ? 'bg-[#ff0055]/20 text-[#ff0055]' 
-                    : 'bg-[#ff00ff]/20 text-[#ff00ff]'
-                }`}>
+                <span
+                  className={`px-2 py-1 text-xs rounded uppercase ${
+                    selectedIncident.severity === 'critical'
+                      ? 'bg-[#ff0055]/20 text-[#ff0055]'
+                      : 'bg-[#ff00ff]/20 text-[#ff00ff]'
+                  }`}
+                >
                   {selectedIncident.severity}
                 </span>
-                <span className={`px-2 py-1 text-xs rounded ${
-                  selectedIncident.status === 'resolved' ? 'bg-[#00ff88]/20 text-[#00ff88]' :
-                  selectedIncident.status === 'contained' ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]' :
-                  'bg-[#ff00ff]/20 text-[#ff00ff]'
-                }`}>
+                <span
+                  className={`px-2 py-1 text-xs rounded ${
+                    selectedIncident.status === 'resolved'
+                      ? 'bg-[#00ff88]/20 text-[#00ff88]'
+                      : selectedIncident.status === 'contained'
+                        ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]'
+                        : 'bg-[#ff00ff]/20 text-[#ff00ff]'
+                  }`}
+                >
                   {selectedIncident.status}
                 </span>
               </div>
@@ -170,7 +248,7 @@ export default function IncidentResponse() {
             <div>
               <h4 className="text-sm text-[#64748b] mb-3">Affected Systems</h4>
               <div className="grid grid-cols-2 gap-2">
-                {selectedIncident.affectedSystems.map((system, idx) => (
+                {asStringArray(selectedIncident.affectedSystems).map((system, idx) => (
                   <div key={idx} className="p-3 rounded-lg border border-[#ff0055]/20 bg-[#ff0055]/10">
                     <p className="text-[#ff0055]">{system}</p>
                   </div>
@@ -183,14 +261,20 @@ export default function IncidentResponse() {
                 <Users className="w-4 h-4 inline mr-2" />
                 Reassign
               </button>
-              <button className="flex-1 px-4 py-3 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]">
+              <button
+                onClick={closeIncident}
+                className="flex-1 px-4 py-3 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]"
+              >
                 <CheckCircle className="w-4 h-4 inline mr-2" />
                 Close Incident
               </button>
             </div>
+
+            {loading ? <div className="text-xs text-[#64748b]">Updating…</div> : null}
           </div>
         )}
       </Modal>
     </div>
   );
 }
+

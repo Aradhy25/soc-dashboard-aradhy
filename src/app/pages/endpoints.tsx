@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { mockDevices } from '../data/mock-data';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/modal';
 import { Monitor, Activity, Ban, Filter, Search } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
+
+import { apiGet } from '../lib/api';
+import type { DeviceSummary } from '../lib/types';
+import { formatRelativeTime } from '../lib/time';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
 
 export default function Endpoints() {
   const location = useLocation();
@@ -17,7 +21,10 @@ export default function Endpoints() {
   const searchQuery = useMemo(() => (query.get('q') ?? '').trim(), [query]);
   const deviceId = useMemo(() => query.get('id') ?? '', [query]);
 
-  const [selectedDevice, setSelectedDevice] = useState<typeof mockDevices[0] | null>(null);
+  const [devices, setDevices] = useState<DeviceSummary[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<DeviceSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const updateQuery = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(location.search);
@@ -29,32 +36,62 @@ export default function Endpoints() {
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
   };
 
-  const filteredDevices = mockDevices.filter((device) => {
-    if (statusFilter !== 'all' && device.status !== statusFilter) return false;
-    if (searchQuery) {
-      const haystack = [
-        device.id,
-        device.name,
-        device.ip,
-        device.os,
-        device.status,
-        device.lastSeen,
-        String(device.alerts),
-      ]
-        .join(' ')
-        .toLowerCase();
-      if (!haystack.includes(searchQuery.toLowerCase())) return false;
-    }
-    return true;
-  });
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await apiGet<{ items: DeviceSummary[] }>('/devices', { limit: 500 });
+        setDevices(next.items);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load devices');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const counts = useMemo(() => {
+    const online = devices.filter((d) => d.status === 'online').length;
+    const isolated = devices.filter((d) => d.status === 'isolated').length;
+    const totalAlerts = devices.reduce((sum, d) => sum + (d.alerts ?? 0), 0);
+    return { online, isolated, totalAlerts };
+  }, [devices]);
+
+  const filteredDevices = useMemo(() => {
+    return devices.filter((device) => {
+      if (statusFilter !== 'all' && device.status !== statusFilter) return false;
+      if (searchQuery) {
+        const haystack = [
+          device.id,
+          device.name,
+          device.ip ?? '',
+          device.os ?? '',
+          device.status,
+          device.apiKeyPrefix,
+          String(device.alerts),
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(searchQuery.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }, [devices, searchQuery, statusFilter]);
 
   useEffect(() => {
     if (!deviceId) {
       setSelectedDevice(null);
       return;
     }
-    setSelectedDevice(mockDevices.find((d) => d.id === deviceId) ?? null);
-  }, [deviceId]);
+    setSelectedDevice(filteredDevices.find((d) => d.id === deviceId) ?? devices.find((d) => d.id === deviceId) ?? null);
+  }, [deviceId, devices, filteredDevices]);
 
   return (
     <div className="space-y-6">
@@ -62,6 +99,12 @@ export default function Endpoints() {
         <h1 className="text-3xl text-[#00f0ff] mb-2">Endpoint Management</h1>
         <p className="text-sm text-[#64748b]">Monitor and manage connected devices</p>
       </div>
+
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <button
@@ -72,7 +115,7 @@ export default function Endpoints() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Online</p>
-              <p className="text-3xl text-[#00ff88]">{mockDevices.filter(d => d.status === 'online').length}</p>
+              <p className="text-3xl text-[#00ff88]">{counts.online}</p>
             </div>
             <Monitor className="w-8 h-8 text-[#00ff88]" />
           </div>
@@ -86,7 +129,7 @@ export default function Endpoints() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Isolated</p>
-              <p className="text-3xl text-[#ff0055]">{mockDevices.filter(d => d.status === 'isolated').length}</p>
+              <p className="text-3xl text-[#ff0055]">{counts.isolated}</p>
             </div>
             <Ban className="w-8 h-8 text-[#ff0055]" />
           </div>
@@ -100,7 +143,7 @@ export default function Endpoints() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Total Alerts</p>
-              <p className="text-3xl text-[#8b5cf6]">{mockDevices.reduce((sum, d) => sum + d.alerts, 0)}</p>
+              <p className="text-3xl text-[#8b5cf6]">{counts.totalAlerts}</p>
             </div>
             <Activity className="w-8 h-8 text-[#8b5cf6]" />
           </div>
@@ -121,8 +164,8 @@ export default function Endpoints() {
           >
             <option value="all">All Status</option>
             <option value="online">Online</option>
-            <option value="isolated">Isolated</option>
             <option value="offline">Offline</option>
+            <option value="isolated">Isolated</option>
           </select>
 
           <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628]">
@@ -135,6 +178,8 @@ export default function Endpoints() {
               className="flex-1 bg-transparent border-none outline-none text-sm text-[#00f0ff] placeholder:text-[#64748b]"
             />
           </div>
+
+          {loading ? <span className="text-xs text-[#64748b]">Loading…</span> : null}
         </div>
       </div>
 
@@ -143,10 +188,10 @@ export default function Endpoints() {
           <table className="w-full">
             <thead className="border-b border-[#00f0ff]/20">
               <tr>
-                <th className="text-left p-4 text-sm text-[#64748b] uppercase">Device ID</th>
+                <th className="text-left p-4 text-sm text-[#64748b] uppercase">ID</th>
                 <th className="text-left p-4 text-sm text-[#64748b] uppercase">Name</th>
-                <th className="text-left p-4 text-sm text-[#64748b] uppercase">IP Address</th>
-                <th className="text-left p-4 text-sm text-[#64748b] uppercase">Operating System</th>
+                <th className="text-left p-4 text-sm text-[#64748b] uppercase">IP</th>
+                <th className="text-left p-4 text-sm text-[#64748b] uppercase">OS</th>
                 <th className="text-left p-4 text-sm text-[#64748b] uppercase">Status</th>
                 <th className="text-left p-4 text-sm text-[#64748b] uppercase">Alerts</th>
                 <th className="text-left p-4 text-sm text-[#64748b] uppercase">Last Seen</th>
@@ -164,21 +209,29 @@ export default function Endpoints() {
                   </td>
                   <td className="p-4 text-[#00f0ff]">{device.name}</td>
                   <td className="p-4">
-                    <span className="text-[#00f0ff] font-mono text-sm">{device.ip}</span>
+                    <span className="text-[#00f0ff] font-mono text-sm">{device.ip ?? 'unknown'}</span>
                   </td>
-                  <td className="p-4 text-[#8b5cf6]">{device.os}</td>
+                  <td className="p-4 text-[#8b5cf6]">{device.os ?? 'unknown'}</td>
                   <td className="p-4">
                     <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${
-                        device.status === 'online' ? 'bg-[#00ff88]' :
-                        device.status === 'isolated' ? 'bg-[#ff0055]' :
-                        'bg-[#64748b]'
-                      } animate-pulse`} />
-                      <span className={`text-sm ${
-                        device.status === 'online' ? 'text-[#00ff88]' :
-                        device.status === 'isolated' ? 'text-[#ff0055]' :
-                        'text-[#64748b]'
-                      }`}>
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          device.status === 'online'
+                            ? 'bg-[#00ff88]'
+                            : device.status === 'isolated'
+                              ? 'bg-[#ff0055]'
+                              : 'bg-[#64748b]'
+                        } animate-pulse`}
+                      />
+                      <span
+                        className={`text-sm ${
+                          device.status === 'online'
+                            ? 'text-[#00ff88]'
+                            : device.status === 'isolated'
+                              ? 'text-[#ff0055]'
+                              : 'text-[#64748b]'
+                        }`}
+                      >
                         {device.status}
                       </span>
                     </div>
@@ -192,7 +245,7 @@ export default function Endpoints() {
                       <span className="text-[#64748b]">0</span>
                     )}
                   </td>
-                  <td className="p-4 text-[#64748b] text-sm">{device.lastSeen}</td>
+                  <td className="p-4 text-[#64748b] text-sm">{formatRelativeTime(device.lastSeenAt)}</td>
                 </tr>
               ))}
             </tbody>
@@ -211,23 +264,29 @@ export default function Endpoints() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">IP Address</p>
-                <p className="text-[#00f0ff] font-mono">{selectedDevice.ip}</p>
+                <p className="text-[#00f0ff] font-mono">{selectedDevice.ip ?? 'unknown'}</p>
               </div>
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Operating System</p>
-                <p className="text-[#00f0ff]">{selectedDevice.os}</p>
+                <p className="text-[#00f0ff]">{selectedDevice.os ?? 'unknown'}</p>
               </div>
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Status</p>
-                <p className={`${
-                  selectedDevice.status === 'online' ? 'text-[#00ff88]' :
-                  selectedDevice.status === 'isolated' ? 'text-[#ff0055]' :
-                  'text-[#64748b]'
-                }`}>{selectedDevice.status}</p>
+                <p
+                  className={`${
+                    selectedDevice.status === 'online'
+                      ? 'text-[#00ff88]'
+                      : selectedDevice.status === 'isolated'
+                        ? 'text-[#ff0055]'
+                        : 'text-[#64748b]'
+                  }`}
+                >
+                  {selectedDevice.status}
+                </p>
               </div>
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Last Seen</p>
-                <p className="text-[#00f0ff]">{selectedDevice.lastSeen}</p>
+                <p className="text-[#00f0ff]">{formatRelativeTime(selectedDevice.lastSeenAt)}</p>
               </div>
             </div>
 
@@ -235,11 +294,14 @@ export default function Endpoints() {
               <h4 className="text-sm text-[#64748b] mb-3">Running Processes</h4>
               <div className="space-y-2">
                 {selectedDevice.processes.map((proc) => (
-                  <div key={proc.id} className={`p-3 rounded-lg border ${
-                    proc.status === 'suspicious'
-                      ? 'border-[#ff0055]/30 bg-[#ff0055]/10'
-                      : 'border-[#00f0ff]/20 bg-[#0a1628]/50'
-                  }`}>
+                  <div
+                    key={`${proc.pid}-${proc.name}`}
+                    className={`p-3 rounded-lg border ${
+                      proc.status === 'suspicious'
+                        ? 'border-[#ff0055]/30 bg-[#ff0055]/10'
+                        : 'border-[#00f0ff]/20 bg-[#0a1628]/50'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
                       <div>
                         <p className={proc.status === 'suspicious' ? 'text-[#ff0055]' : 'text-[#00f0ff]'}>
@@ -274,3 +336,4 @@ export default function Endpoints() {
     </div>
   );
 }
+

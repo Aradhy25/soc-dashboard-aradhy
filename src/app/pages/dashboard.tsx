@@ -1,24 +1,80 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, TrendingUp, Activity, Shield, ChevronRight } from 'lucide-react';
-import { mockAlerts, mockDevices, mockLogs, attackTrendsData, attackMapData } from '../data/mock-data';
 import { Modal } from '../components/modal';
 import { AlertDetail } from '../components/alert-detail';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router';
+import { apiGet, apiPatch } from '../lib/api';
+import type { AlertItem, DashboardOverview, DeviceSummary, LogItem, Paginated } from '../lib/types';
+import { asPrettyJson, formatRelativeTime } from '../lib/time';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
 
 export default function Dashboard() {
-  const [selectedAlert, setSelectedAlert] = useState<typeof mockAlerts[0] | null>(null);
-  const [selectedDevice, setSelectedDevice] = useState<typeof mockDevices[0] | null>(null);
-  const [selectedLog, setSelectedLog] = useState<typeof mockLogs[0] | null>(null);
+  const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  const [devices, setDevices] = useState<DeviceSummary[]>([]);
+  const [openAlerts, setOpenAlerts] = useState<AlertItem[]>([]);
+  const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<DeviceSummary | null>(null);
+  const [selectedLog, setSelectedLog] = useState<LogItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const criticalAlerts = mockAlerts.filter(a => a.severity === 'critical');
-  const highAlerts = mockAlerts.filter(a => a.severity === 'high');
-  const openAlerts = mockAlerts.filter(a => a.status === 'open');
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setError(null);
+
+        const [nextOverview, nextDevices, nextOpenAlerts] = await Promise.all([
+          apiGet<DashboardOverview>('/dashboard/overview'),
+          apiGet<{ items: DeviceSummary[] }>('/devices', { limit: 10 }),
+          apiGet<Paginated<AlertItem>>('/alerts', { status: 'open', limit: 10 }),
+        ]);
+
+        setOverview(nextOverview);
+        setDevices(nextDevices.items);
+        setOpenAlerts(nextOpenAlerts.items);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load dashboard');
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const stats = useMemo(
+    () =>
+      overview?.stats ?? {
+        criticalAlerts: 0,
+        highAlerts: 0,
+        openAlerts: 0,
+        onlineDevices: 0,
+        isolatedDevices: 0,
+      },
+    [overview]
+  );
+
+  const attackTrends = overview?.charts.attackTrends ?? [];
+  const attackMap = overview?.charts.attackMap ?? [];
+  const recentLogs = overview?.recent.logs ?? [];
 
   const handleAlertAction = (action: string) => {
-    console.log('Action:', action);
-    // Handle action
+    void (async () => {
+      if (!selectedAlert) return;
+
+      try {
+        if (action === 'status-investigating') {
+          await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'investigating' });
+        } else if (action === 'status-resolved') {
+          await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'resolved' });
+        }
+      } finally {
+        refresh();
+      }
+    })();
   };
 
   return (
@@ -34,6 +90,12 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
+
       {/* Alert Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <button
@@ -45,7 +107,7 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Critical Alerts</p>
-              <p className="text-3xl text-[#ff0055]">{criticalAlerts.length}</p>
+              <p className="text-3xl text-[#ff0055]">{stats.criticalAlerts}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-[#ff0055]" />
           </div>
@@ -61,7 +123,7 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">High Alerts</p>
-              <p className="text-3xl text-[#ff00ff]">{highAlerts.length}</p>
+              <p className="text-3xl text-[#ff00ff]">{stats.highAlerts}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-[#ff00ff]" />
           </div>
@@ -77,7 +139,7 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Active Devices</p>
-              <p className="text-3xl text-[#00f0ff]">{mockDevices.filter(d => d.status === 'online').length}</p>
+              <p className="text-3xl text-[#00f0ff]">{stats.onlineDevices}</p>
             </div>
             <Activity className="w-8 h-8 text-[#00f0ff]" />
           </div>
@@ -123,7 +185,7 @@ export default function Dashboard() {
           </div>
 
           <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={attackTrendsData}>
+            <AreaChart data={attackTrends}>
               <defs>
                 <linearGradient id="bruteForceGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#ff0055" stopOpacity={0.3} />
@@ -233,7 +295,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          {attackMapData.map((country, index) => (
+          {attackMap.map((country, index) => (
             <div
               key={index}
               className="p-4 rounded-lg border border-[#8b5cf6]/20 bg-[#8b5cf6]/10 hover:bg-[#8b5cf6]/20 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all cursor-pointer"
@@ -267,7 +329,7 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-3">
-            {mockDevices.map((device) => (
+            {devices.map((device) => (
               <div
                 key={device.id}
                 onClick={() => setSelectedDevice(device)}
@@ -282,7 +344,9 @@ export default function Dashboard() {
                     } animate-pulse`} />
                     <div>
                       <p className="text-[#00f0ff] group-hover:text-[#00ff88] transition-colors">{device.name}</p>
-                      <p className="text-xs text-[#64748b]">{device.ip} • {device.os}</p>
+                      <p className="text-xs text-[#64748b]">
+                        {(device.ip ?? 'unknown')} • {(device.os ?? 'unknown')}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -316,7 +380,7 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-3">
-            {mockLogs.map((log) => (
+            {recentLogs.map((log) => (
               <div
                 key={log.id}
                 onClick={() => setSelectedLog(log)}
@@ -333,7 +397,7 @@ export default function Dashboard() {
                       }`}>
                         {log.severity}
                       </span>
-                      <span className="text-xs text-[#64748b]">{log.device}</span>
+                      <span className="text-xs text-[#64748b]">{log.device?.name ?? 'unknown'}</span>
                     </div>
                     <p className="text-sm text-[#00ff88] group-hover:text-[#00f0ff] transition-colors">{log.message}</p>
                   </div>
@@ -369,11 +433,11 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">IP Address</p>
-                <p className="text-[#00f0ff] font-mono">{selectedDevice.ip}</p>
+                <p className="text-[#00f0ff] font-mono">{selectedDevice.ip ?? 'unknown'}</p>
               </div>
               <div className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Operating System</p>
-                <p className="text-[#00f0ff]">{selectedDevice.os}</p>
+                <p className="text-[#00f0ff]">{selectedDevice.os ?? 'unknown'}</p>
               </div>
               <div className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Status</p>
@@ -385,7 +449,7 @@ export default function Dashboard() {
               </div>
               <div className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Last Seen</p>
-                <p className="text-[#00f0ff]">{selectedDevice.lastSeen}</p>
+                <p className="text-[#00f0ff]">{formatRelativeTime(selectedDevice.lastSeenAt)}</p>
               </div>
             </div>
 
@@ -393,7 +457,7 @@ export default function Dashboard() {
               <h4 className="text-sm text-[#64748b] mb-3">Running Processes</h4>
               <div className="space-y-2">
                 {selectedDevice.processes.map((proc) => (
-                  <div key={proc.id} className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
+                  <div key={`${proc.pid}-${proc.name}`} className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-[#00f0ff]">{proc.name}</p>
@@ -427,7 +491,7 @@ export default function Dashboard() {
               </div>
               <div className="p-3 rounded-lg border border-[#00ff88]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Device</p>
-                <p className="text-[#00ff88]">{selectedLog.device}</p>
+                <p className="text-[#00ff88]">{selectedLog.device?.name ?? 'unknown'}</p>
               </div>
               <div className="p-3 rounded-lg border border-[#00ff88]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Event Type</p>
@@ -451,7 +515,7 @@ export default function Dashboard() {
 
             <div className="p-4 rounded-lg border border-[#00ff88]/20 bg-[#000509]">
               <p className="text-xs text-[#64748b] mb-2">Raw Data</p>
-              <pre className="text-xs text-[#00ff88] font-mono whitespace-pre-wrap">{selectedLog.rawData}</pre>
+              <pre className="text-xs text-[#00ff88] font-mono whitespace-pre-wrap">{asPrettyJson(selectedLog.rawData)}</pre>
             </div>
           </div>
         )}

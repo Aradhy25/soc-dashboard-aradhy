@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
+import { SocRealtimeProvider } from './lib/realtime';
 
 export default function App() {
   return (
@@ -11,7 +12,9 @@ export default function App() {
         </div>
       }
     >
-      <RouterProvider router={router} />
+      <SocRealtimeProvider>
+        <RouterProvider router={router} />
+      </SocRealtimeProvider>
     </Suspense>
   );
 }

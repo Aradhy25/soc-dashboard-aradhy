@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { mockLogs } from '../data/mock-data';
-import { Modal } from '../components/modal';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Filter, Search, Download } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
+
+import { Modal } from '../components/modal';
+import { apiGet } from '../lib/api';
+import type { LogItem, Paginated } from '../lib/types';
+import { asPrettyJson } from '../lib/time';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
 
 export default function Logs() {
   const location = useLocation();
@@ -17,7 +21,10 @@ export default function Logs() {
   const searchQuery = useMemo(() => (query.get('q') ?? '').trim(), [query]);
   const logId = useMemo(() => query.get('id') ?? '', [query]);
 
-  const [selectedLog, setSelectedLog] = useState<typeof mockLogs[0] | null>(null);
+  const [page, setPage] = useState<Paginated<LogItem> | null>(null);
+  const [selectedLog, setSelectedLog] = useState<LogItem | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const updateQuery = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(location.search);
@@ -29,34 +36,57 @@ export default function Logs() {
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
   };
 
-  const filteredLogs = mockLogs.filter((log) => {
-    if (severityFilter !== 'all' && log.severity !== severityFilter) return false;
-    if (searchQuery) {
-      const haystack = [
-        log.id,
-        log.timestamp,
-        log.device,
-        log.eventType,
-        log.severity,
-        log.message,
-        log.sourceIp ?? '',
-        log.destinationIp ?? '',
-        log.rawData,
-      ]
-        .join(' ')
-        .toLowerCase();
-      if (!haystack.includes(searchQuery.toLowerCase())) return false;
-    }
-    return true;
-  });
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const next = await apiGet<Paginated<LogItem>>('/logs', {
+          severity: severityFilter !== 'all' ? severityFilter : undefined,
+          q: searchQuery || undefined,
+          limit: 200,
+          offset: 0,
+        });
+
+        setPage(next);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load logs');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [searchQuery, severityFilter]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const logs = page?.items ?? [];
 
   useEffect(() => {
     if (!logId) {
       setSelectedLog(null);
       return;
     }
-    setSelectedLog(mockLogs.find((l) => l.id === logId) ?? null);
-  }, [logId]);
+
+    const fromList = logs.find((l) => l.id === logId);
+    if (fromList) {
+      setSelectedLog(fromList);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const fetched = await apiGet<LogItem>(`/logs/${logId}`);
+        setSelectedLog(fetched);
+      } catch {
+        setSelectedLog(null);
+      }
+    })();
+  }, [logId, logs]);
 
   return (
     <div className="space-y-6">
@@ -70,6 +100,12 @@ export default function Logs() {
           <span>Export Logs</span>
         </button>
       </div>
+
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
 
       <div className="p-4 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#0a1628] to-[#000913]">
         <div className="flex flex-wrap items-center gap-4">
@@ -100,6 +136,8 @@ export default function Logs() {
               className="flex-1 bg-transparent border-none outline-none text-sm text-[#00f0ff] placeholder:text-[#64748b]"
             />
           </div>
+
+          {loading ? <span className="text-xs text-[#64748b]">Loading…</span> : null}
         </div>
       </div>
 
@@ -117,7 +155,7 @@ export default function Logs() {
               </tr>
             </thead>
             <tbody>
-              {filteredLogs.map((log) => (
+              {logs.map((log) => (
                 <tr
                   key={log.id}
                   onClick={() => updateQuery({ id: log.id })}
@@ -126,18 +164,21 @@ export default function Logs() {
                   <td className="p-4">
                     <span className="text-[#00f0ff] font-mono text-sm">{log.id}</span>
                   </td>
-                  <td className="p-4 text-[#64748b] text-sm">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </td>
-                  <td className="p-4 text-[#00f0ff]">{log.device}</td>
+                  <td className="p-4 text-[#64748b] text-sm">{new Date(log.timestamp).toLocaleString()}</td>
+                  <td className="p-4 text-[#00f0ff]">{log.device?.name ?? 'unknown'}</td>
                   <td className="p-4 text-[#8b5cf6]">{log.eventType}</td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded uppercase ${
-                      log.severity === 'critical' ? 'bg-[#ff0055]/20 text-[#ff0055]' :
-                      log.severity === 'error' ? 'bg-[#ff00ff]/20 text-[#ff00ff]' :
-                      log.severity === 'warning' ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]' :
-                      'bg-[#00f0ff]/20 text-[#00f0ff]'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded uppercase ${
+                        log.severity === 'critical'
+                          ? 'bg-[#ff0055]/20 text-[#ff0055]'
+                          : log.severity === 'error'
+                            ? 'bg-[#ff00ff]/20 text-[#ff00ff]'
+                            : log.severity === 'warning'
+                              ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]'
+                              : 'bg-[#00f0ff]/20 text-[#00f0ff]'
+                      }`}
+                    >
                       {log.severity}
                     </span>
                   </td>
@@ -164,7 +205,7 @@ export default function Logs() {
               </div>
               <div className="p-3 rounded-lg border border-[#00ff88]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Device</p>
-                <p className="text-[#00ff88]">{selectedLog.device}</p>
+                <p className="text-[#00ff88]">{selectedLog.device?.name ?? 'unknown'}</p>
               </div>
               <div className="p-3 rounded-lg border border-[#00ff88]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Event Type</p>
@@ -181,7 +222,7 @@ export default function Logs() {
             </div>
             <div className="p-4 rounded-lg border border-[#00ff88]/20 bg-[#000509]">
               <p className="text-xs text-[#64748b] mb-2">Raw Data</p>
-              <pre className="text-xs text-[#00ff88] font-mono whitespace-pre-wrap">{selectedLog.rawData}</pre>
+              <pre className="text-xs text-[#00ff88] font-mono whitespace-pre-wrap">{asPrettyJson(selectedLog.rawData)}</pre>
             </div>
           </div>
         )}
@@ -189,3 +230,4 @@ export default function Logs() {
     </div>
   );
 }
+

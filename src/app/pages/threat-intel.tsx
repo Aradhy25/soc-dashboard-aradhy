@@ -1,12 +1,60 @@
-import { useState } from 'react';
-import { mockThreats } from '../data/mock-data';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/modal';
 import { Brain, Search, AlertTriangle, Hash, Globe } from 'lucide-react';
 
+import { apiGet } from '../lib/api';
+import type { ThreatItem, ThreatType } from '../lib/types';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+
 export default function ThreatIntel() {
-  const [selectedThreat, setSelectedThreat] = useState<typeof mockThreats[0] | null>(null);
+  const [selectedThreat, setSelectedThreat] = useState<ThreatItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchType, setSearchType] = useState<'ip' | 'hash' | 'domain'>('ip');
+  const [searchType, setSearchType] = useState<ThreatType>('ip');
+
+  // Applied filters (only change when user clicks "Lookup")
+  const [appliedQuery, setAppliedQuery] = useState<string>('');
+  const [appliedType, setAppliedType] = useState<ThreatType | null>(null);
+
+  const [items, setItems] = useState<ThreatItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await apiGet<{ items: ThreatItem[] }>('/threats', {
+          type: appliedType ?? undefined,
+          q: appliedQuery || undefined,
+        });
+        setItems(next.items);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load threat intel');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [appliedQuery, appliedType]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const stats = useMemo(() => {
+    return {
+      critical: items.filter((t) => t.severity === 'critical').length,
+      high: items.filter((t) => t.severity === 'high').length,
+      total: items.length,
+    };
+  }, [items]);
+
+  const onLookup = () => {
+    setAppliedType(searchType);
+    setAppliedQuery(searchQuery.trim());
+  };
 
   return (
     <div className="space-y-6">
@@ -15,9 +63,15 @@ export default function ThreatIntel() {
         <p className="text-sm text-[#64748b]">IOC lookup and threat analysis</p>
       </div>
 
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
+
       <div className="p-6 rounded-lg border border-[#8b5cf6]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] shadow-[0_0_20px_rgba(139,92,246,0.2)]">
         <h3 className="text-xl text-[#8b5cf6] mb-4">IOC Lookup</h3>
-        
+
         <div className="flex gap-4 mb-4">
           <button
             onClick={() => setSearchType('ip')}
@@ -65,8 +119,11 @@ export default function ThreatIntel() {
               className="flex-1 bg-transparent border-none outline-none text-[#00f0ff] placeholder:text-[#64748b]"
             />
           </div>
-          <button className="px-6 py-3 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/20 hover:bg-[#8b5cf6]/30 transition-all text-[#8b5cf6]">
-            Lookup
+          <button
+            onClick={onLookup}
+            className="px-6 py-3 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/20 hover:bg-[#8b5cf6]/30 transition-all text-[#8b5cf6]"
+          >
+            {loading ? 'Loading…' : 'Lookup'}
           </button>
         </div>
       </div>
@@ -76,7 +133,7 @@ export default function ThreatIntel() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Critical Threats</p>
-              <p className="text-3xl text-[#ff0055]">{mockThreats.filter(t => t.severity === 'critical').length}</p>
+              <p className="text-3xl text-[#ff0055]">{stats.critical}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-[#ff0055]" />
           </div>
@@ -86,7 +143,7 @@ export default function ThreatIntel() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">High Threats</p>
-              <p className="text-3xl text-[#ff00ff]">{mockThreats.filter(t => t.severity === 'high').length}</p>
+              <p className="text-3xl text-[#ff00ff]">{stats.high}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-[#ff00ff]" />
           </div>
@@ -96,7 +153,7 @@ export default function ThreatIntel() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">IOCs Tracked</p>
-              <p className="text-3xl text-[#00f0ff]">{mockThreats.length}</p>
+              <p className="text-3xl text-[#00f0ff]">{stats.total}</p>
             </div>
             <Brain className="w-8 h-8 text-[#00f0ff]" />
           </div>
@@ -104,14 +161,9 @@ export default function ThreatIntel() {
       </div>
 
       <div className="rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] overflow-hidden">
-        <div className="p-6">
-          <h3 className="text-xl text-[#00f0ff] mb-2">Threat Feed</h3>
-          <p className="text-sm text-[#64748b] mb-6">Known indicators of compromise</p>
-        </div>
-
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="border-y border-[#00f0ff]/20">
+            <thead className="border-b border-[#00f0ff]/20">
               <tr>
                 <th className="text-left p-4 text-sm text-[#64748b] uppercase">ID</th>
                 <th className="text-left p-4 text-sm text-[#64748b] uppercase">Type</th>
@@ -123,7 +175,7 @@ export default function ThreatIntel() {
               </tr>
             </thead>
             <tbody>
-              {mockThreats.map((threat) => (
+              {items.map((threat) => (
                 <tr
                   key={threat.id}
                   onClick={() => setSelectedThreat(threat)}
@@ -141,11 +193,15 @@ export default function ThreatIntel() {
                     <span className="text-[#00f0ff] font-mono text-sm">{threat.value}</span>
                   </td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded uppercase ${
-                      threat.severity === 'critical' ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30' :
-                      threat.severity === 'high' ? 'bg-[#ff00ff]/20 text-[#ff00ff] border border-[#ff00ff]/30' :
-                      'bg-[#8b5cf6]/20 text-[#8b5cf6] border border-[#8b5cf6]/30'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded uppercase ${
+                        threat.severity === 'critical'
+                          ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30'
+                          : threat.severity === 'high'
+                            ? 'bg-[#ff00ff]/20 text-[#ff00ff] border border-[#ff00ff]/30'
+                            : 'bg-[#8b5cf6]/20 text-[#8b5cf6] border border-[#8b5cf6]/30'
+                      }`}
+                    >
                       {threat.severity}
                     </span>
                   </td>
@@ -161,9 +217,7 @@ export default function ThreatIntel() {
                       <span className="text-sm text-[#00f0ff]">{threat.reputation}/10</span>
                     </div>
                   </td>
-                  <td className="p-4 text-[#64748b] text-sm">
-                    {new Date(threat.lastSeen).toLocaleDateString()}
-                  </td>
+                  <td className="p-4 text-[#64748b] text-sm">{new Date(threat.lastSeen).toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -186,11 +240,17 @@ export default function ThreatIntel() {
               </div>
               <div className="p-4 rounded-lg border border-[#8b5cf6]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Severity</p>
-                <p className={`uppercase ${
-                  selectedThreat.severity === 'critical' ? 'text-[#ff0055]' :
-                  selectedThreat.severity === 'high' ? 'text-[#ff00ff]' :
-                  'text-[#8b5cf6]'
-                }`}>{selectedThreat.severity}</p>
+                <p
+                  className={`uppercase ${
+                    selectedThreat.severity === 'critical'
+                      ? 'text-[#ff0055]'
+                      : selectedThreat.severity === 'high'
+                        ? 'text-[#ff00ff]'
+                        : 'text-[#8b5cf6]'
+                  }`}
+                >
+                  {selectedThreat.severity}
+                </p>
               </div>
             </div>
 
@@ -233,3 +293,4 @@ export default function ThreatIntel() {
     </div>
   );
 }
+

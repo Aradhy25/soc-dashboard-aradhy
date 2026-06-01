@@ -1,10 +1,53 @@
-import { useState } from 'react';
-import { mockUsers } from '../data/mock-data';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/modal';
 import { Users as UsersIcon, Shield, AlertTriangle } from 'lucide-react';
 
+import { apiGet } from '../lib/api';
+import type { ObservedUser } from '../lib/types';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+
+function hoursSince(value: string | null): number | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return (Date.now() - d.getTime()) / (60 * 60 * 1000);
+}
+
 export default function Users() {
-  const [selectedUser, setSelectedUser] = useState<typeof mockUsers[0] | null>(null);
+  const [items, setItems] = useState<ObservedUser[]>([]);
+  const [selectedUser, setSelectedUser] = useState<ObservedUser | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await apiGet<{ items: ObservedUser[] }>('/users');
+        setItems(next.items);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load users');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const stats = useMemo(() => {
+    const highRisk = items.filter((u) => u.riskScore >= 50).length;
+    const activeSessions = items.filter((u) => {
+      const h = hoursSince(u.lastLogin);
+      return h !== null && h <= 2;
+    }).length;
+    return { total: items.length, activeSessions, highRisk };
+  }, [items]);
 
   return (
     <div className="space-y-6">
@@ -13,12 +56,18 @@ export default function Users() {
         <p className="text-sm text-[#64748b]">Monitor user activity and behavior</p>
       </div>
 
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#00f0ff]/20 to-transparent shadow-[0_0_15px_rgba(0,240,255,0.3)]">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Total Users</p>
-              <p className="text-3xl text-[#00f0ff]">{mockUsers.length}</p>
+              <p className="text-3xl text-[#00f0ff]">{stats.total}</p>
             </div>
             <UsersIcon className="w-8 h-8 text-[#00f0ff]" />
           </div>
@@ -28,17 +77,18 @@ export default function Users() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Active Sessions</p>
-              <p className="text-3xl text-[#00ff88]">42</p>
+              <p className="text-3xl text-[#00ff88]">{stats.activeSessions}</p>
             </div>
             <Shield className="w-8 h-8 text-[#00ff88]" />
           </div>
+          <div className="text-xs text-[#00ff88]">Last 2 hours</div>
         </div>
 
         <div className="p-6 rounded-lg border border-[#ff0055]/30 bg-gradient-to-br from-[#ff0055]/20 to-transparent shadow-[0_0_15px_rgba(255,0,85,0.3)]">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">High Risk Users</p>
-              <p className="text-3xl text-[#ff0055]">1</p>
+              <p className="text-3xl text-[#ff0055]">{stats.highRisk}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-[#ff0055]" />
           </div>
@@ -60,7 +110,7 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {mockUsers.map((user) => (
+              {items.map((user) => (
                 <tr
                   key={user.id}
                   onClick={() => setSelectedUser(user)}
@@ -70,14 +120,14 @@ export default function Users() {
                     <span className="text-[#00f0ff] font-mono text-sm">{user.id}</span>
                   </td>
                   <td className="p-4 text-[#00f0ff]">{user.username}</td>
-                  <td className="p-4 text-[#64748b]">{user.email}</td>
+                  <td className="p-4 text-[#64748b]">{user.email ?? '—'}</td>
                   <td className="p-4">
                     <span className="px-2 py-1 text-xs rounded bg-[#8b5cf6]/20 text-[#8b5cf6]">
-                      {user.role}
+                      {user.role ?? '—'}
                     </span>
                   </td>
                   <td className="p-4 text-[#64748b] text-sm">
-                    {new Date(user.lastLogin).toLocaleString()}
+                    {user.lastLogin ? new Date(user.lastLogin).toLocaleString() : '—'}
                   </td>
                   <td className="p-4">
                     <span className={`${user.failedAttempts > 0 ? 'text-[#ff0055]' : 'text-[#00ff88]'}`}>
@@ -89,18 +139,24 @@ export default function Users() {
                       <div className="flex-1 h-2 bg-[#1a2942] rounded-full overflow-hidden">
                         <div
                           className={`h-full ${
-                            user.riskScore > 50 ? 'bg-[#ff0055]' :
-                            user.riskScore > 30 ? 'bg-[#ff00ff]' :
-                            'bg-[#00ff88]'
+                            user.riskScore > 50
+                              ? 'bg-[#ff0055]'
+                              : user.riskScore > 30
+                                ? 'bg-[#ff00ff]'
+                                : 'bg-[#00ff88]'
                           }`}
                           style={{ width: `${user.riskScore}%` }}
                         />
                       </div>
-                      <span className={`text-sm ${
-                        user.riskScore > 50 ? 'text-[#ff0055]' :
-                        user.riskScore > 30 ? 'text-[#ff00ff]' :
-                        'text-[#00ff88]'
-                      }`}>
+                      <span
+                        className={`text-sm ${
+                          user.riskScore > 50
+                            ? 'text-[#ff0055]'
+                            : user.riskScore > 30
+                              ? 'text-[#ff00ff]'
+                              : 'text-[#00ff88]'
+                        }`}
+                      >
                         {user.riskScore}
                       </span>
                     </div>
@@ -127,22 +183,24 @@ export default function Users() {
               </div>
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Email</p>
-                <p className="text-[#00f0ff]">{selectedUser.email}</p>
+                <p className="text-[#00f0ff]">{selectedUser.email ?? '—'}</p>
               </div>
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Role</p>
-                <p className="text-[#00f0ff]">{selectedUser.role}</p>
+                <p className="text-[#00f0ff]">{selectedUser.role ?? '—'}</p>
               </div>
               <div className="p-4 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                 <p className="text-xs text-[#64748b] mb-1">Last Login</p>
-                <p className="text-[#00f0ff]">{new Date(selectedUser.lastLogin).toLocaleString()}</p>
+                <p className="text-[#00f0ff]">
+                  {selectedUser.lastLogin ? new Date(selectedUser.lastLogin).toLocaleString() : '—'}
+                </p>
               </div>
             </div>
 
             <div>
               <h4 className="text-sm text-[#64748b] mb-3">Associated Devices</h4>
               <div className="space-y-2">
-                {selectedUser.devices.map((device, idx) => (
+                {(selectedUser.devices ?? []).map((device, idx) => (
                   <div key={idx} className="p-3 rounded-lg border border-[#00f0ff]/20 bg-[#0a1628]/50">
                     <p className="text-[#00f0ff]">{device}</p>
                   </div>
@@ -159,9 +217,12 @@ export default function Users() {
                 <Shield className="w-8 h-8 text-[#ff0055]" />
               </div>
             </div>
+
+            {loading ? <div className="text-xs text-[#64748b]">Updating…</div> : null}
           </div>
         )}
       </Modal>
     </div>
   );
 }
+

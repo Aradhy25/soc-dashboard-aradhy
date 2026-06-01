@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { mockAlerts } from '../data/mock-data';
-import { Modal } from '../components/modal';
-import { AlertDetail } from '../components/alert-detail';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Filter, Search, Plus } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
+
+import { Modal } from '../components/modal';
+import { AlertDetail } from '../components/alert-detail';
+import { apiGet, apiPatch } from '../lib/api';
+import type { AlertItem, Paginated } from '../lib/types';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
 
 export default function Alerts() {
   const location = useLocation();
@@ -22,17 +25,24 @@ export default function Alerts() {
 
   const searchQuery = useMemo(() => (query.get('q') ?? '').trim(), [query]);
   const alertId = useMemo(() => query.get('id') ?? '', [query]);
+  const attackTypeQuery = useMemo(() => (query.get('attackType') ?? '').trim(), [query]);
 
-  const attackTypeOptions = useMemo(() => {
-    return Array.from(new Set(mockAlerts.map((a) => a.attackType))).sort((a, b) => a.localeCompare(b));
-  }, []);
+  const [page, setPage] = useState<Paginated<AlertItem> | null>(null);
+  const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const attackTypeFilter = useMemo(() => {
-    const v = query.get('attackType');
-    return v && attackTypeOptions.includes(v) ? v : 'all';
-  }, [attackTypeOptions, query]);
+    if (!attackTypeQuery || attackTypeQuery === 'all') return 'all';
+    return attackTypeQuery;
+  }, [attackTypeQuery]);
 
-  const [selectedAlert, setSelectedAlert] = useState<typeof mockAlerts[0] | null>(null);
+  const attackTypeOptions = useMemo(() => {
+    const items = page?.items ?? [];
+    const set = new Set(items.map((a) => a.attackType).filter(Boolean));
+    if (attackTypeQuery && attackTypeQuery !== 'all') set.add(attackTypeQuery);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [attackTypeQuery, page]);
 
   const updateQuery = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(location.search);
@@ -44,31 +54,63 @@ export default function Alerts() {
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
   };
 
-  const filteredAlerts = mockAlerts.filter(alert => {
-    if (severityFilter !== 'all' && alert.severity !== severityFilter) return false;
-    if (statusFilter !== 'all' && alert.status !== statusFilter) return false;
-    if (attackTypeFilter !== 'all' && alert.attackType !== attackTypeFilter) return false;
-    if (searchQuery) {
-      const haystack = [
-        alert.id,
-        alert.title,
-        alert.description,
-        alert.status,
-        alert.severity,
-        alert.affectedSystem,
-        alert.sourceIp,
-        alert.attackType,
-        alert.mitreId ?? '',
-      ]
-        .join(' ')
-        .toLowerCase();
-      if (!haystack.includes(searchQuery.toLowerCase())) return false;
-    }
-    return true;
-  });
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const next = await apiGet<Paginated<AlertItem>>('/alerts', {
+          severity: severityFilter !== 'all' ? severityFilter : undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          attackType: attackTypeFilter !== 'all' ? attackTypeFilter : undefined,
+          q: searchQuery || undefined,
+          limit: 200,
+          offset: 0,
+        });
+
+        setPage(next);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load alerts');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [attackTypeFilter, searchQuery, severityFilter, statusFilter]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const filteredAlerts = page?.items ?? [];
+
+  const severityCounts = useMemo(() => {
+    const counts: Record<'critical' | 'high' | 'medium' | 'low', number> = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+    for (const a of filteredAlerts) counts[a.severity] += 1;
+    return counts;
+  }, [filteredAlerts]);
 
   const handleAlertAction = (action: string) => {
-    console.log('Action:', action);
+    void (async () => {
+      if (!selectedAlert) return;
+
+      try {
+        if (action === 'status-investigating') {
+          await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'investigating' });
+        } else if (action === 'status-resolved') {
+          await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'resolved' });
+        }
+      } finally {
+        refresh();
+      }
+    })();
   };
 
   useEffect(() => {
@@ -76,8 +118,22 @@ export default function Alerts() {
       setSelectedAlert(null);
       return;
     }
-    setSelectedAlert(mockAlerts.find((a) => a.id === alertId) ?? null);
-  }, [alertId]);
+
+    const fromList = filteredAlerts.find((a) => a.id === alertId);
+    if (fromList) {
+      setSelectedAlert(fromList);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const fetched = await apiGet<AlertItem>(`/alerts/${alertId}`);
+        setSelectedAlert(fetched);
+      } catch {
+        setSelectedAlert(null);
+      }
+    })();
+  }, [alertId, filteredAlerts]);
 
   return (
     <div className="space-y-6">
@@ -92,6 +148,12 @@ export default function Alerts() {
           <span>Create Rule</span>
         </button>
       </div>
+
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
 
       {/* Filters */}
       <div className="p-4 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#0a1628] to-[#000913]">
@@ -147,6 +209,8 @@ export default function Alerts() {
               className="flex-1 bg-transparent border-none outline-none text-sm text-[#00f0ff] placeholder:text-[#64748b]"
             />
           </div>
+
+          {loading ? <span className="text-xs text-[#64748b]">Loading…</span> : null}
         </div>
       </div>
 
@@ -154,19 +218,19 @@ export default function Alerts() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10">
           <p className="text-sm text-[#64748b] mb-1">Critical</p>
-          <p className="text-2xl text-[#ff0055]">{mockAlerts.filter(a => a.severity === 'critical').length}</p>
+          <p className="text-2xl text-[#ff0055]">{severityCounts.critical}</p>
         </div>
         <div className="p-4 rounded-lg border border-[#ff00ff]/30 bg-[#ff00ff]/10">
           <p className="text-sm text-[#64748b] mb-1">High</p>
-          <p className="text-2xl text-[#ff00ff]">{mockAlerts.filter(a => a.severity === 'high').length}</p>
+          <p className="text-2xl text-[#ff00ff]">{severityCounts.high}</p>
         </div>
         <div className="p-4 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10">
           <p className="text-sm text-[#64748b] mb-1">Medium</p>
-          <p className="text-2xl text-[#8b5cf6]">{mockAlerts.filter(a => a.severity === 'medium').length}</p>
+          <p className="text-2xl text-[#8b5cf6]">{severityCounts.medium}</p>
         </div>
         <div className="p-4 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10">
           <p className="text-sm text-[#64748b] mb-1">Low</p>
-          <p className="text-2xl text-[#00f0ff]">{mockAlerts.filter(a => a.severity === 'low').length}</p>
+          <p className="text-2xl text-[#00f0ff]">{severityCounts.low}</p>
         </div>
       </div>
 
@@ -196,12 +260,17 @@ export default function Alerts() {
                     <span className="text-[#00f0ff] font-mono text-sm">{alert.id}</span>
                   </td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded uppercase ${
-                      alert.severity === 'critical' ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30' :
-                      alert.severity === 'high' ? 'bg-[#ff00ff]/20 text-[#ff00ff] border border-[#ff00ff]/30' :
-                      alert.severity === 'medium' ? 'bg-[#8b5cf6]/20 text-[#8b5cf6] border border-[#8b5cf6]/30' :
-                      'bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/30'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded uppercase ${
+                        alert.severity === 'critical'
+                          ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30'
+                          : alert.severity === 'high'
+                            ? 'bg-[#ff00ff]/20 text-[#ff00ff] border border-[#ff00ff]/30'
+                            : alert.severity === 'medium'
+                              ? 'bg-[#8b5cf6]/20 text-[#8b5cf6] border border-[#8b5cf6]/30'
+                              : 'bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/30'
+                      }`}
+                    >
                       {alert.severity}
                     </span>
                   </td>
@@ -211,22 +280,24 @@ export default function Alerts() {
                       <span className="text-[#00f0ff]">{alert.title}</span>
                     </div>
                   </td>
-                  <td className="p-4 text-[#64748b]">{alert.affectedSystem}</td>
+                  <td className="p-4 text-[#64748b]">{alert.affectedSystem ?? alert.device?.name ?? 'unknown'}</td>
                   <td className="p-4">
-                    <span className="text-[#00f0ff] font-mono text-sm">{alert.sourceIp}</span>
+                    <span className="text-[#00f0ff] font-mono text-sm">{alert.sourceIp ?? 'unknown'}</span>
                   </td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      alert.status === 'resolved' ? 'bg-[#00ff88]/20 text-[#00ff88]' :
-                      alert.status === 'investigating' ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]' :
-                      'bg-[#ff00ff]/20 text-[#ff00ff]'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded ${
+                        alert.status === 'resolved'
+                          ? 'bg-[#00ff88]/20 text-[#00ff88]'
+                          : alert.status === 'investigating'
+                            ? 'bg-[#8b5cf6]/20 text-[#8b5cf6]'
+                            : 'bg-[#ff00ff]/20 text-[#ff00ff]'
+                      }`}
+                    >
                       {alert.status}
                     </span>
                   </td>
-                  <td className="p-4 text-[#64748b] text-sm">
-                    {new Date(alert.timestamp).toLocaleString()}
-                  </td>
+                  <td className="p-4 text-[#64748b] text-sm">{new Date(alert.timestamp).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -241,10 +312,9 @@ export default function Alerts() {
         title={`Alert Details - ${selectedAlert?.id}`}
         size="xl"
       >
-        {selectedAlert && (
-          <AlertDetail alert={selectedAlert} onAction={handleAlertAction} />
-        )}
+        {selectedAlert && <AlertDetail alert={selectedAlert} onAction={handleAlertAction} />}
       </Modal>
     </div>
   );
 }
+

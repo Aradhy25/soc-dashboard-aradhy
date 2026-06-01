@@ -1,24 +1,64 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Network as NetworkIcon, Activity, Globe } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const trafficData = [
-  { time: '00:00', inbound: 1200, outbound: 800 },
-  { time: '04:00', inbound: 900, outbound: 600 },
-  { time: '08:00', inbound: 2100, outbound: 1400 },
-  { time: '12:00', inbound: 2800, outbound: 1900 },
-  { time: '16:00', inbound: 2400, outbound: 1600 },
-  { time: '20:00', inbound: 1800, outbound: 1200 },
-  { time: '24:00', inbound: 1400, outbound: 900 },
-];
+import { apiGet } from '../lib/api';
+import type { NetworkOverview } from '../lib/types';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
 
-const connections = [
-  { src: '192.168.1.100', dst: '203.0.113.50', port: 443, protocol: 'HTTPS', status: 'normal' },
-  { src: '192.168.1.105', dst: '45.142.213.89', port: 22, protocol: 'SSH', status: 'suspicious' },
-  { src: '10.0.1.50', dst: '8.8.8.8', port: 53, protocol: 'DNS', status: 'normal' },
-  { src: '192.168.1.78', dst: '103.45.67.12', port: 3389, protocol: 'RDP', status: 'suspicious' },
-];
+function formatRate(value: number): string {
+  const n = Math.max(0, value);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} GB/s`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)} MB/s`;
+  return `${n} KB/s`;
+}
+
+function timeLabel(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 export default function Network() {
+  const [overview, setOverview] = useState<NetworkOverview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await apiGet<NetworkOverview>('/network/overview', { hours: 24 });
+        setOverview(next);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load network overview');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const trafficData = useMemo(() => {
+    const traffic = overview?.traffic ?? [];
+    return traffic.map((t) => ({ time: timeLabel(t.time), inbound: t.inbound, outbound: t.outbound }));
+  }, [overview]);
+
+  const stats = overview?.stats ?? {
+    activeConnections: 0,
+    suspiciousActivity: 0,
+    maxInbound: 0,
+    maxOutbound: 0,
+  };
+
+  const connections = overview?.connections ?? [];
+
   return (
     <div className="space-y-6">
       <div>
@@ -26,34 +66,40 @@ export default function Network() {
         <p className="text-sm text-[#64748b]">Real-time network traffic analysis</p>
       </div>
 
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#00f0ff]/20 to-transparent shadow-[0_0_15px_rgba(0,240,255,0.3)]">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Active Connections</p>
-              <p className="text-3xl text-[#00f0ff]">1,247</p>
+              <p className="text-3xl text-[#00f0ff]">{stats.activeConnections.toLocaleString()}</p>
             </div>
             <NetworkIcon className="w-8 h-8 text-[#00f0ff]" />
           </div>
-          <div className="text-xs text-[#00f0ff]">↑ 12% from average</div>
+          <div className="text-xs text-[#00f0ff]">Last 24 hours</div>
         </div>
 
         <div className="p-6 rounded-lg border border-[#8b5cf6]/30 bg-gradient-to-br from-[#8b5cf6]/20 to-transparent shadow-[0_0_15px_rgba(139,92,246,0.3)]">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Bandwidth Usage</p>
-              <p className="text-3xl text-[#8b5cf6]">2.8 GB/s</p>
+              <p className="text-3xl text-[#8b5cf6]">{formatRate(stats.maxInbound + stats.maxOutbound)}</p>
             </div>
             <Activity className="w-8 h-8 text-[#8b5cf6]" />
           </div>
-          <div className="text-xs text-[#8b5cf6]">Within normal range</div>
+          <div className="text-xs text-[#8b5cf6]">Peak in/out combined</div>
         </div>
 
         <div className="p-6 rounded-lg border border-[#ff00ff]/30 bg-gradient-to-br from-[#ff00ff]/20 to-transparent shadow-[0_0_15px_rgba(255,0,255,0.3)]">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Suspicious Activity</p>
-              <p className="text-3xl text-[#ff00ff]">8</p>
+              <p className="text-3xl text-[#ff00ff]">{stats.suspiciousActivity.toLocaleString()}</p>
             </div>
             <Globe className="w-8 h-8 text-[#ff00ff]" />
           </div>
@@ -62,9 +108,12 @@ export default function Network() {
       </div>
 
       <div className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#0a1628] to-[#000913] shadow-[0_0_20px_rgba(0,240,255,0.2)]">
-        <div className="mb-6">
-          <h3 className="text-xl text-[#00f0ff] mb-2">Traffic Overview</h3>
-          <p className="text-sm text-[#64748b]">24-hour network activity</p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h3 className="text-xl text-[#00f0ff] mb-2">Traffic Overview</h3>
+            <p className="text-sm text-[#64748b]">24-hour network activity</p>
+          </div>
+          {loading ? <span className="text-xs text-[#64748b]">Loading…</span> : null}
         </div>
 
         <ResponsiveContainer width="100%" height={300}>
@@ -114,9 +163,9 @@ export default function Network() {
               </tr>
             </thead>
             <tbody>
-              {connections.map((conn, idx) => (
+              {connections.map((conn) => (
                 <tr
-                  key={idx}
+                  key={conn.id}
                   className="border-b border-[#00f0ff]/10 hover:bg-[#0a1628]/80 cursor-pointer transition-colors"
                 >
                   <td className="p-4">
@@ -128,11 +177,13 @@ export default function Network() {
                   <td className="p-4 text-[#8b5cf6]">{conn.port}</td>
                   <td className="p-4 text-[#00f0ff]">{conn.protocol}</td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      conn.status === 'suspicious' 
-                        ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30' 
-                        : 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded ${
+                        conn.status === 'suspicious'
+                          ? 'bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/30'
+                          : 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
+                      }`}
+                    >
                       {conn.status}
                     </span>
                   </td>
@@ -145,3 +196,4 @@ export default function Network() {
     </div>
   );
 }
+

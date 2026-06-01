@@ -1,23 +1,51 @@
+import { useCallback, useEffect, useState } from 'react';
 import { FileDown, Calendar } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const reportData = [
-  { day: 'Mon', alerts: 45, resolved: 38 },
-  { day: 'Tue', alerts: 52, resolved: 45 },
-  { day: 'Wed', alerts: 38, resolved: 35 },
-  { day: 'Thu', alerts: 62, resolved: 54 },
-  { day: 'Fri', alerts: 48, resolved: 42 },
-  { day: 'Sat', alerts: 28, resolved: 25 },
-  { day: 'Sun', alerts: 22, resolved: 20 },
-];
+import { apiGet } from '../lib/api';
+import type { WeeklyReport } from '../lib/types';
+import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
 
 export default function Reports() {
+  const [report, setReport] = useState<WeeklyReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await apiGet<WeeklyReport>('/reports/weekly');
+        setReport(next);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load reports');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useSocLiveRefresh(refresh);
+
+  const reportData = report?.data ?? [];
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl text-[#00f0ff] mb-2">Reports & Analytics</h1>
         <p className="text-sm text-[#64748b]">Generate and export security reports</p>
       </div>
+
+      {error ? (
+        <div className="p-4 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 text-[#ff0055] text-sm">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <button className="p-6 rounded-lg border border-[#00f0ff]/30 bg-gradient-to-br from-[#00f0ff]/20 to-transparent hover:shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all text-left">
@@ -50,6 +78,8 @@ export default function Reports() {
             <span>Export</span>
           </button>
         </div>
+
+        {loading ? <div className="text-xs text-[#64748b] mb-3">Loading…</div> : null}
 
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={reportData}>
@@ -88,3 +118,4 @@ export default function Reports() {
     </div>
   );
 }
+
