@@ -10,3 +10,15 @@ vite.config.d.ts
 recovered/
 source_make/
 .vercel
+
+# Local env files (never commit secrets)
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Local/dev databases (Prisma)
+server/prisma/*.db
+server/prisma/*.db-*
