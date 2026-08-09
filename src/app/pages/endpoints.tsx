@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/modal';
-import { Monitor, Activity, Ban, Filter, Search } from 'lucide-react';
+import { Monitor, Activity, Ban, Filter, Search, Plus } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { apiGet } from '../lib/api';
-import type { DeviceSummary } from '../lib/types';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
+import type { DeviceActionResult, DeviceSummary } from '../lib/types';
 import { formatRelativeTime } from '../lib/time';
 import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+import { useToast } from '../lib/toast';
 
 export default function Endpoints() {
   const location = useLocation();
   const navigate = useNavigate();
   const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const { pushToast } = useToast();
 
   const statusFilter = useMemo(() => {
     const v = query.get('status');
@@ -25,6 +27,12 @@ export default function Endpoints() {
   const [selectedDevice, setSelectedDevice] = useState<DeviceSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regIp, setRegIp] = useState('');
+  const [regOs, setRegOs] = useState('');
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const updateQuery = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(location.search);
@@ -93,11 +101,65 @@ export default function Endpoints() {
     setSelectedDevice(filteredDevices.find((d) => d.id === deviceId) ?? devices.find((d) => d.id === deviceId) ?? null);
   }, [deviceId, devices, filteredDevices]);
 
+  const runDeviceAction = (action: 'isolate' | 'restore' | 'shutdown' | 'scan' | 'kill-process', processPid?: number) => {
+    void (async () => {
+      if (!selectedDevice) return;
+      try {
+        setBusyAction(action);
+        const result = await apiPatch<DeviceActionResult>(`/devices/${selectedDevice.id}`, {
+          action,
+          processPid,
+        });
+        setSelectedDevice(result.device);
+        pushToast(result.message ?? `Device ${action} completed`, 'success');
+        refresh();
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : 'Device action failed', 'error');
+      } finally {
+        setBusyAction(null);
+      }
+    })();
+  };
+
+  const registerDevice = () => {
+    void (async () => {
+      if (!regName.trim()) {
+        pushToast('Device name is required', 'error');
+        return;
+      }
+      try {
+        const result = await apiPost<{ device: DeviceSummary; apiKey: string }>('/devices', {
+          name: regName.trim(),
+          ip: regIp.trim() || undefined,
+          os: regOs.trim() || undefined,
+        });
+        setCreatedKey(result.apiKey);
+        pushToast(`Registered ${result.device.name}`, 'success');
+        refresh();
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : 'Failed to register device', 'error');
+      }
+    })();
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl text-[#00f0ff] mb-2">Endpoint Management</h1>
-        <p className="text-sm text-[#64748b]">Monitor and manage connected devices</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl text-[#00f0ff] mb-2">Endpoint Management</h1>
+          <p className="text-sm text-[#64748b]">Monitor and manage connected devices</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setRegisterOpen(true);
+            setCreatedKey(null);
+          }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 transition-all text-[#00f0ff]"
+        >
+          <Plus className="w-4 h-4" />
+          Register Device
+        </button>
       </div>
 
       {error ? (
@@ -299,19 +361,41 @@ export default function Endpoints() {
                     className={`p-3 rounded-lg border ${
                       proc.status === 'suspicious'
                         ? 'border-[#ff0055]/30 bg-[#ff0055]/10'
-                        : 'border-[#00f0ff]/20 bg-[#0a1628]/50'
+                        : proc.status === 'killed'
+                          ? 'border-[#64748b]/30 bg-[#64748b]/10'
+                          : 'border-[#00f0ff]/20 bg-[#0a1628]/50'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className={proc.status === 'suspicious' ? 'text-[#ff0055]' : 'text-[#00f0ff]'}>
+                        <p
+                          className={
+                            proc.status === 'suspicious'
+                              ? 'text-[#ff0055]'
+                              : proc.status === 'killed'
+                                ? 'text-[#64748b]'
+                                : 'text-[#00f0ff]'
+                          }
+                        >
                           {proc.name}
                         </p>
-                        <p className="text-xs text-[#64748b]">PID: {proc.pid}</p>
+                        <p className="text-xs text-[#64748b]">
+                          PID: {proc.pid} · {proc.status}
+                        </p>
                       </div>
                       <div className="text-right">
                         <p className="text-sm text-[#00f0ff]">CPU: {proc.cpu}%</p>
                         <p className="text-xs text-[#64748b]">MEM: {proc.memory}MB</p>
+                        {proc.status !== 'killed' ? (
+                          <button
+                            type="button"
+                            disabled={busyAction !== null}
+                            onClick={() => runDeviceAction('kill-process', proc.pid)}
+                            className="mt-2 text-xs text-[#ff0055] hover:underline"
+                          >
+                            Kill
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -319,21 +403,107 @@ export default function Endpoints() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <button className="px-4 py-2 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 hover:bg-[#ff0055]/20 transition-all text-[#ff0055]">
-                Isolate
-              </button>
-              <button className="px-4 py-2 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10 hover:bg-[#8b5cf6]/20 transition-all text-[#8b5cf6]">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {selectedDevice.status === 'isolated' ? (
+                <button
+                  type="button"
+                  disabled={busyAction !== null}
+                  onClick={() => runDeviceAction('restore')}
+                  className="px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]"
+                >
+                  Restore
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busyAction !== null}
+                  onClick={() => runDeviceAction('isolate')}
+                  className="px-4 py-2 rounded-lg border border-[#ff0055]/30 bg-[#ff0055]/10 hover:bg-[#ff0055]/20 transition-all text-[#ff0055]"
+                >
+                  Isolate
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busyAction !== null}
+                onClick={() => runDeviceAction('scan')}
+                className="px-4 py-2 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10 hover:bg-[#8b5cf6]/20 transition-all text-[#8b5cf6]"
+              >
                 Scan
               </button>
-              <button className="px-4 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 transition-all text-[#00f0ff]">
+              <button
+                type="button"
+                disabled={busyAction !== null}
+                onClick={() => runDeviceAction('shutdown')}
+                className="px-4 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 transition-all text-[#00f0ff]"
+              >
                 Shutdown
+              </button>
+              <button
+                type="button"
+                disabled={busyAction !== null}
+                onClick={() => runDeviceAction('kill-process')}
+                className="px-4 py-2 rounded-lg border border-[#ff00ff]/30 bg-[#ff00ff]/10 hover:bg-[#ff00ff]/20 transition-all text-[#ff00ff]"
+              >
+                Kill Suspicious
               </button>
             </div>
           </div>
         )}
       </Modal>
+
+      <Modal
+        isOpen={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        title="Register Device"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-[#64748b] mb-1 block">Name</label>
+            <input
+              value={regName}
+              onChange={(e) => setRegName(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] outline-none"
+              placeholder="workstation-42"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[#64748b] mb-1 block">IP</label>
+              <input
+                value={regIp}
+                onChange={(e) => setRegIp(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] outline-none"
+                placeholder="10.0.0.42"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[#64748b] mb-1 block">OS</label>
+              <input
+                value={regOs}
+                onChange={(e) => setRegOs(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] outline-none"
+                placeholder="Windows 11"
+              />
+            </div>
+          </div>
+          {createdKey ? (
+            <div className="p-3 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10">
+              <p className="text-xs text-[#64748b] mb-1">API key (shown once)</p>
+              <p className="text-sm text-[#00ff88] font-mono break-all">{createdKey}</p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={registerDevice}
+              className="w-full px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 text-[#00ff88]"
+            >
+              Create Device
+            </button>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
-

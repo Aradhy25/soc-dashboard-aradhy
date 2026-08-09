@@ -4,9 +4,10 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { Modal } from '../components/modal';
 import { AlertDetail } from '../components/alert-detail';
-import { apiGet, apiPatch } from '../lib/api';
-import type { AlertItem, Paginated } from '../lib/types';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
+import type { AlertActionResult, AlertItem, Paginated } from '../lib/types';
 import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+import { useToast } from '../lib/toast';
 
 export default function Alerts() {
   const location = useLocation();
@@ -31,6 +32,10 @@ export default function Alerts() {
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ruleOpen, setRuleOpen] = useState(false);
+  const [ruleIp, setRuleIp] = useState('');
+  const [ruleDesc, setRuleDesc] = useState('');
+  const { pushToast } = useToast();
 
   const attackTypeFilter = useMemo(() => {
     if (!attackTypeQuery || attackTypeQuery === 'all') return 'all';
@@ -104,11 +109,48 @@ export default function Alerts() {
       try {
         if (action === 'status-investigating') {
           await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'investigating' });
+          pushToast('Alert marked investigating', 'success');
         } else if (action === 'status-resolved') {
           await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'resolved' });
+          pushToast('Alert resolved', 'success');
+        } else {
+          const result = await apiPost<AlertActionResult>(`/alerts/${selectedAlert.id}/actions`, { action });
+          pushToast(result.message ?? `Action ${action} completed`, 'success');
+          if (result.alert) setSelectedAlert(result.alert);
+          if (action === 'escalate' && result.incident) {
+            navigate(`/incidents`);
+          }
         }
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : 'Action failed', 'error');
       } finally {
         refresh();
+      }
+    })();
+  };
+
+  const createBlockRule = () => {
+    void (async () => {
+      const value = ruleIp.trim();
+      if (!value) {
+        pushToast('Enter an IP to block', 'error');
+        return;
+      }
+      try {
+        await apiPost('/threats', {
+          type: 'ip',
+          value,
+          severity: 'high',
+          description: ruleDesc.trim() || `Manual block rule for ${value}`,
+          reputation: 8,
+        });
+        pushToast(`Created block rule for ${value}`, 'success');
+        setRuleOpen(false);
+        setRuleIp('');
+        setRuleDesc('');
+        navigate('/threat-intel');
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : 'Failed to create rule', 'error');
       }
     })();
   };
@@ -143,7 +185,11 @@ export default function Alerts() {
           <h1 className="text-3xl text-[#00f0ff] mb-2">Alerts Management</h1>
           <p className="text-sm text-[#64748b]">Monitor and respond to security threats</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 hover:shadow-[0_0_15px_rgba(0,240,255,0.3)] transition-all text-[#00f0ff]">
+        <button
+          type="button"
+          onClick={() => setRuleOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 hover:shadow-[0_0_15px_rgba(0,240,255,0.3)] transition-all text-[#00f0ff]"
+        >
           <Plus className="w-4 h-4" />
           <span>Create Rule</span>
         </button>
@@ -313,6 +359,36 @@ export default function Alerts() {
         size="xl"
       >
         {selectedAlert && <AlertDetail alert={selectedAlert} onAction={handleAlertAction} />}
+      </Modal>
+
+      <Modal isOpen={ruleOpen} onClose={() => setRuleOpen(false)} title="Create Block Rule" size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-[#64748b] mb-1 block">IP Address</label>
+            <input
+              value={ruleIp}
+              onChange={(e) => setRuleIp(e.target.value)}
+              placeholder="203.0.113.10"
+              className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] outline-none focus:border-[#00f0ff]"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-[#64748b] mb-1 block">Description</label>
+            <input
+              value={ruleDesc}
+              onChange={(e) => setRuleDesc(e.target.value)}
+              placeholder="Reason for blocking"
+              className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff] outline-none focus:border-[#00f0ff]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={createBlockRule}
+            className="w-full px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 text-[#00ff88] transition-all"
+          >
+            Save Rule
+          </button>
+        </div>
       </Modal>
     </div>
   );

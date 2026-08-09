@@ -11,7 +11,7 @@ export interface DeviceProcess {
   pid: number;
   cpu: number;
   memory: number;
-  status: 'running' | 'suspicious';
+  status: 'running' | 'suspicious' | 'killed';
 }
 
 export interface DeviceSummary {
@@ -109,6 +109,8 @@ export interface DashboardOverview {
     openAlerts: number;
     onlineDevices: number;
     isolatedDevices: number;
+    securityScore: number;
+    scoreDelta: number;
   };
   recent: {
     alerts: AlertItem[];
@@ -118,6 +120,34 @@ export interface DashboardOverview {
     attackTrends: Array<{ time: string; bruteForce: number; malware: number; injection: number }>;
     attackMap: Array<{ country: string; attacks: number; lat: number; lng: number }>;
   };
+}
+
+export interface AlertActionResult {
+  action: string;
+  message?: string;
+  alert?: AlertItem;
+  incident?: IncidentItem;
+  threat?: ThreatItem;
+  device?: DeviceSummary;
+}
+
+export interface DeviceActionResult {
+  device: DeviceSummary;
+  message?: string | null;
+}
+
+export interface WeeklyReport {
+  data: Array<{ day: string; alerts: number; resolved: number }>;
+  summary?: {
+    period: string;
+    start: string;
+    end: string;
+    totalAlerts: number;
+    resolved: number;
+    critical: number;
+    high: number;
+  };
+  alerts?: Array<Pick<AlertItem, 'timestamp' | 'status' | 'severity' | 'title' | 'attackType'>>;
 }
 
 export interface Paginated<T> {
@@ -146,7 +176,4 @@ export interface NetworkOverview {
   }>;
 }
 
-export interface WeeklyReport {
-  data: Array<{ day: string; alerts: number; resolved: number }>;
-}
 

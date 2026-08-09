@@ -3,19 +3,25 @@ import { Modal } from '../components/modal';
 import { Shield, Clock, Users, CheckCircle } from 'lucide-react';
 
 import { apiGet, apiPatch } from '../lib/api';
-import type { IncidentItem } from '../lib/types';
+import type { IncidentItem, IncidentStatus } from '../lib/types';
 import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+import { useToast } from '../lib/toast';
 
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((x): x is string => typeof x === 'string');
 }
 
+const assignees = ['SOC Analyst', 'IR Lead', 'Threat Hunter', 'On-Call Engineer'];
+
 export default function IncidentResponse() {
   const [items, setItems] = useState<IncidentItem[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<IncidentItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [assignee, setAssignee] = useState(assignees[0]);
+  const { pushToast } = useToast();
 
   const refresh = useCallback(() => {
     void (async () => {
@@ -47,13 +53,21 @@ export default function IncidentResponse() {
     };
   }, [items]);
 
-  const closeIncident = () => {
+  const updateIncident = (data: { status?: IncidentStatus; assignedTo?: string }) => {
     void (async () => {
       if (!selectedIncident) return;
       try {
-        await apiPatch(`/incidents/${selectedIncident.id}`, { status: 'resolved' });
-      } finally {
+        const updated = await apiPatch<IncidentItem>(`/incidents/${selectedIncident.id}`, data);
+        setSelectedIncident(updated);
+        pushToast(
+          data.assignedTo
+            ? `Reassigned to ${data.assignedTo}`
+            : `Incident marked ${data.status ?? 'updated'}`,
+          'success'
+        );
         refresh();
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : 'Update failed', 'error');
       }
     })();
   };
@@ -256,17 +270,39 @@ export default function IncidentResponse() {
               </div>
             </div>
 
-            <div className="flex gap-3">
-              <button className="flex-1 px-4 py-3 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10 hover:bg-[#8b5cf6]/20 transition-all text-[#8b5cf6]">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <button
+                type="button"
+                onClick={() => updateIncident({ status: 'investigating' })}
+                className="px-4 py-2 rounded-lg border border-[#ff00ff]/30 bg-[#ff00ff]/10 text-[#ff00ff]"
+              >
+                Investigating
+              </button>
+              <button
+                type="button"
+                onClick={() => updateIncident({ status: 'contained' })}
+                className="px-4 py-2 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10 text-[#8b5cf6]"
+              >
+                Contained
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignee(selectedIncident.assignedTo || assignees[0]);
+                  setReassignOpen(true);
+                }}
+                className="px-4 py-2 rounded-lg border border-[#8b5cf6]/30 bg-[#8b5cf6]/10 hover:bg-[#8b5cf6]/20 transition-all text-[#8b5cf6]"
+              >
                 <Users className="w-4 h-4 inline mr-2" />
                 Reassign
               </button>
               <button
-                onClick={closeIncident}
-                className="flex-1 px-4 py-3 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]"
+                type="button"
+                onClick={() => updateIncident({ status: 'resolved' })}
+                className="px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]"
               >
                 <CheckCircle className="w-4 h-4 inline mr-2" />
-                Close Incident
+                Close
               </button>
             </div>
 
@@ -274,7 +310,38 @@ export default function IncidentResponse() {
           </div>
         )}
       </Modal>
+
+      <Modal isOpen={reassignOpen} onClose={() => setReassignOpen(false)} title="Reassign Incident" size="sm">
+        <div className="space-y-4">
+          <select
+            value={assignee}
+            onChange={(e) => setAssignee(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff]"
+          >
+            {assignees.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <input
+            value={assignee}
+            onChange={(e) => setAssignee(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#0a1628] text-[#00f0ff]"
+            placeholder="Custom assignee"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              updateIncident({ assignedTo: assignee.trim() || 'SOC Analyst' });
+              setReassignOpen(false);
+            }}
+            className="w-full px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 text-[#00ff88]"
+          >
+            Confirm Reassign
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
-

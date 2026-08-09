@@ -4,10 +4,11 @@ import { Modal } from '../components/modal';
 import { AlertDetail } from '../components/alert-detail';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router';
-import { apiGet, apiPatch } from '../lib/api';
-import type { AlertItem, DashboardOverview, DeviceSummary, LogItem, Paginated } from '../lib/types';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
+import type { AlertActionResult, AlertItem, DashboardOverview, DeviceSummary, LogItem, Paginated } from '../lib/types';
 import { asPrettyJson, formatRelativeTime } from '../lib/time';
 import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+import { useToast } from '../lib/toast';
 
 export default function Dashboard() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [selectedLog, setSelectedLog] = useState<LogItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { pushToast } = useToast();
 
   const refresh = useCallback(() => {
     void (async () => {
@@ -53,6 +55,8 @@ export default function Dashboard() {
         openAlerts: 0,
         onlineDevices: 0,
         isolatedDevices: 0,
+        securityScore: 0,
+        scoreDelta: 0,
       },
     [overview]
   );
@@ -68,9 +72,17 @@ export default function Dashboard() {
       try {
         if (action === 'status-investigating') {
           await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'investigating' });
+          pushToast('Alert marked investigating', 'success');
         } else if (action === 'status-resolved') {
           await apiPatch(`/alerts/${selectedAlert.id}`, { status: 'resolved' });
+          pushToast('Alert resolved', 'success');
+        } else {
+          const result = await apiPost<AlertActionResult>(`/alerts/${selectedAlert.id}/actions`, { action });
+          pushToast(result.message ?? `Action ${action} completed`, 'success');
+          if (result.alert) setSelectedAlert(result.alert);
         }
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : 'Action failed', 'error');
       } finally {
         refresh();
       }
@@ -155,11 +167,13 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-[#64748b] uppercase mb-2">Security Score</p>
-              <p className="text-3xl text-[#00ff88]">94.2%</p>
+              <p className="text-3xl text-[#00ff88]">{stats.securityScore.toFixed(1)}%</p>
             </div>
             <Shield className="w-8 h-8 text-[#00ff88]" />
           </div>
-          <div className="text-xs text-[#00ff88]">↑ 2.3% from yesterday</div>
+          <div className="text-xs text-[#00ff88]">
+            {stats.scoreDelta >= 0 ? '↑' : '↓'} {Math.abs(stats.scoreDelta).toFixed(1)}% from yesterday
+          </div>
         </button>
       </div>
 

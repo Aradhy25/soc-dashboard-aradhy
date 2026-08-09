@@ -6,12 +6,15 @@ import { Modal } from '../components/modal';
 import { apiGet } from '../lib/api';
 import type { LogItem, Paginated } from '../lib/types';
 import { asPrettyJson } from '../lib/time';
+import { downloadTextFile, toCsv } from '../lib/preferences';
 import { useSocLiveRefresh } from '../lib/use-soc-live-refresh';
+import { useToast } from '../lib/toast';
 
 export default function Logs() {
   const location = useLocation();
   const navigate = useNavigate();
   const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const { pushToast } = useToast();
 
   const severityFilter = useMemo(() => {
     const v = query.get('severity');
@@ -88,6 +91,31 @@ export default function Logs() {
     })();
   }, [logId, logs]);
 
+  const exportLogs = (format: 'csv' | 'json') => {
+    if (logs.length === 0) {
+      pushToast('No logs to export', 'error');
+      return;
+    }
+
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    if (format === 'json') {
+      downloadTextFile(`soc-logs-${stamp}.json`, JSON.stringify(logs, null, 2), 'application/json');
+    } else {
+      const rows = logs.map((log) => ({
+        id: log.id,
+        timestamp: log.timestamp,
+        device: log.device?.name ?? '',
+        eventType: log.eventType,
+        severity: log.severity,
+        message: log.message,
+        sourceIp: log.sourceIp ?? '',
+        destinationIp: log.destinationIp ?? '',
+      }));
+      downloadTextFile(`soc-logs-${stamp}.csv`, toCsv(rows), 'text/csv');
+    }
+    pushToast(`Exported ${logs.length} logs as ${format.toUpperCase()}`, 'success');
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -95,10 +123,24 @@ export default function Logs() {
           <h1 className="text-3xl text-[#00f0ff] mb-2">Log Explorer</h1>
           <p className="text-sm text-[#64748b]">Search and analyze system logs</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]">
-          <Download className="w-4 h-4" />
-          <span>Export Logs</span>
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => exportLogs('csv')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 transition-all text-[#00ff88]"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => exportLogs('json')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#00f0ff]/30 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 transition-all text-[#00f0ff]"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export JSON</span>
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -230,4 +272,3 @@ export default function Logs() {
     </div>
   );
 }
-
