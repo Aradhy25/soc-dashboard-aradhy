@@ -127,3 +127,6 @@ npm run db:deploy && npm run seed
 ## Notes
 
 - `server/.env` is for local dev only. Do not commit secrets.
+- Operator response actions (block IP, isolate host, kill process, escalate) are available from alert details.
+- Endpoint actions (isolate / restore / scan / shutdown) and device registration are available on Endpoints.
+- Reports and logs support CSV/JSON export; settings preferences persist in the browser.

@@ -14,7 +14,40 @@ const patchIncidentSchema = z.object({
   assignedTo: z.string().min(1).optional(),
 });
 
+const createIncidentSchema = z.object({
+  title: z.string().min(1),
+  severity: z.enum(['critical', 'high', 'medium', 'low']),
+  status: z.enum(['open', 'investigating', 'contained', 'resolved']).optional(),
+  assignedTo: z.string().min(1),
+  rootCause: z.string().min(1),
+  affectedSystems: z.array(z.string()).default([]),
+});
+
 export default async function incidentsRoutes(app: FastifyInstance) {
+  app.post('/', async (req, reply) => {
+    const parsed = createIncidentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+
+    const created = await prisma.incident.create({
+      data: {
+        title: parsed.data.title,
+        severity: parsed.data.severity,
+        status: parsed.data.status ?? 'open',
+        assignedTo: parsed.data.assignedTo,
+        createdAt: new Date(),
+        rootCause: parsed.data.rootCause,
+        affectedSystems: parsed.data.affectedSystems,
+      },
+    });
+
+    app.io.emit('incidents:update', created);
+    app.io.emit('soc:update', { kind: 'incident', id: created.id });
+
+    return reply.code(201).send(created);
+  });
+
   app.get('/', async (req) => {
     const query = req.query as Record<string, unknown>;
     const status = asString(query.status);

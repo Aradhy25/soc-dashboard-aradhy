@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
 import { SocRealtimeProvider } from './lib/realtime';
+import { ToastProvider } from './lib/toast';
 
 export default function App() {
   return (
@@ -13,7 +14,9 @@ export default function App() {
       }
     >
       <SocRealtimeProvider>
-        <RouterProvider router={router} />
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
       </SocRealtimeProvider>
     </Suspense>
   );

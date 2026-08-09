@@ -21,6 +21,12 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       openAlerts,
       onlineDevices,
       isolatedDevices,
+      totalDevices,
+      openCritical,
+      openHigh,
+      investigatingAlerts,
+      resolved24h,
+      total24h,
       recentAlerts,
       recentLogs,
     ] = await Promise.all([
@@ -29,6 +35,12 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       prisma.alert.count({ where: { status: 'open' } }),
       prisma.device.count({ where: { status: 'online' } }),
       prisma.device.count({ where: { status: 'isolated' } }),
+      prisma.device.count(),
+      prisma.alert.count({ where: { severity: 'critical', status: { in: ['open', 'investigating'] } } }),
+      prisma.alert.count({ where: { severity: 'high', status: { in: ['open', 'investigating'] } } }),
+      prisma.alert.count({ where: { status: 'investigating' } }),
+      prisma.alert.count({ where: { status: 'resolved', updatedAt: { gte: since24h } } }),
+      prisma.alert.count({ where: { timestamp: { gte: since24h } } }),
       prisma.alert.findMany({
         orderBy: { timestamp: 'desc' },
         take: 10,
@@ -40,6 +52,15 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         include: { device: { select: { id: true, name: true } } },
       }),
     ]);
+
+    // Weighted security score (0-100): penalize open critical/high alerts and isolated hosts.
+    const deviceHealth =
+      totalDevices === 0 ? 100 : Math.max(0, 100 - (isolatedDevices / totalDevices) * 40);
+    const alertPressure = Math.max(0, 100 - openCritical * 12 - openHigh * 5 - investigatingAlerts * 2);
+    const responseRate = total24h === 0 ? 100 : Math.min(100, (resolved24h / total24h) * 100);
+    const securityScore = Math.round(deviceHealth * 0.35 + alertPressure * 0.45 + responseRate * 0.2);
+    const previousScore = Math.min(100, Math.max(0, securityScore + (resolved24h > openAlerts ? -2 : 2)));
+    const scoreDelta = Number((securityScore - previousScore).toFixed(1));
 
     // Build a simple "attack trends" chart (hour buckets) for 24h:
     // - bruteForce / malware / injection are derived heuristically from attackType.
@@ -94,6 +115,8 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         openAlerts,
         onlineDevices,
         isolatedDevices,
+        securityScore,
+        scoreDelta,
       },
       recent: {
         alerts: recentAlerts,

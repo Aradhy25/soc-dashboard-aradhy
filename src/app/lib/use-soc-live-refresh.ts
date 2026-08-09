@@ -1,17 +1,28 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { loadPreferences, type SocPreferences } from './preferences';
 import { useSocSocket } from './realtime';
 
 export function useSocLiveRefresh(refresh: () => void, throttleMs = 600) {
   const socket = useSocSocket();
   const refreshRef = useRef(refresh);
+  const [prefs, setPrefs] = useState<SocPreferences>(() => loadPreferences());
 
   useEffect(() => {
     refreshRef.current = refresh;
   }, [refresh]);
 
   useEffect(() => {
-    if (!socket) return;
+    const onPrefs = (event: Event) => {
+      const detail = (event as CustomEvent<SocPreferences>).detail;
+      if (detail) setPrefs(detail);
+    };
+    window.addEventListener('soc:preferences', onPrefs as EventListener);
+    return () => window.removeEventListener('soc:preferences', onPrefs as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (!socket || !prefs.autoRefresh) return;
 
     let timer: number | null = null;
     const schedule = () => {
@@ -27,6 +38,12 @@ export function useSocLiveRefresh(refresh: () => void, throttleMs = 600) {
       socket.off('soc:update', schedule);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [socket, throttleMs]);
-}
+  }, [socket, throttleMs, prefs.autoRefresh]);
 
+  useEffect(() => {
+    if (!prefs.autoRefresh) return;
+    const intervalMs = Math.max(5, prefs.refreshIntervalSec) * 1000;
+    const id = window.setInterval(() => refreshRef.current(), intervalMs);
+    return () => window.clearInterval(id);
+  }, [prefs.autoRefresh, prefs.refreshIntervalSec]);
+}
